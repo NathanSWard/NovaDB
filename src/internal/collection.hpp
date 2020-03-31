@@ -4,6 +4,7 @@
 #include "bson.hpp"
 #include "../debug.hpp"
 #include "document.hpp"
+#include "index.hpp"
 #include "map_results.hpp"
 #include "non_null_ptr.hpp"
 
@@ -12,56 +13,141 @@
 
 namespace nova {
 
+class collection;
+
+ class collection_iterator {
+        decltype(std::declval<std::vector<document*>>().begin()) it_;
+        using iter_type = decltype(it_);
+    public:
+        using value_type = document;
+        using reference = document&;
+        using iterator_category = iter_type::iterator_category;
+        using difference_type = iter_type::difference_type;
+        
+        constexpr collection_iterator(iter_type it) noexcept : it_(it) {}
+        
+        auto operator++() { ++it_; return *this; }
+        reference operator*() { return **it_; }
+        bool operator==(collection_iterator const& rhs) const noexcept { return it_ == rhs.it_; }
+        bool operator!=(collection_iterator const& rhs) const noexcept { return it_ != rhs.it_; }
+    };
+
+    class collection_const_iterator {
+        decltype(std::declval<std::vector<document*>>().cbegin()) it_;
+        using iter_type = decltype(it_);
+    public:
+        using value_type = document;
+        using reference = document const&;
+        using iterator_category = iter_type::iterator_category;
+        using difference_type = iter_type::difference_type;
+        
+        constexpr collection_const_iterator(iter_type it) noexcept : it_(it) { }
+        
+        auto operator++() { ++it_; return *this; }
+        reference operator*() { return **it_; }
+        bool operator==(collection_const_iterator const& rhs) const noexcept { return it_ == rhs.it_; }
+        bool operator!=(collection_const_iterator const& rhs) const noexcept { return it_ != rhs.it_; }
+    };
+
+class query_result {
+    std::vector<document*> docs_{};
+    friend class collection;
+public:
+    [[nodiscard]] collection_iterator begin() noexcept { return docs_.begin(); }
+    [[nodiscard]] collection_const_iterator begin() const noexcept { return docs_.begin(); }
+    [[nodiscard]] collection_iterator end() noexcept { return docs_.end(); }
+    [[nodiscard]] collection_const_iterator end() const noexcept { return docs_.end(); }
+};
+
 class collection {
-    std::unordered_map<doc_id, doc_values> docs_{};
+    std::vector<document*> docs_{};
+    unordered_unique_index id_index_{};
+    //std::unordered_map<std::string, index> indices_{};
 
 public:
     collection() = default;
 
-    template<class... Fields>
-    auto scan(Fields&&... fields) {
-        std::vector<valid_lookup<doc_id, doc_values>> docs;
-        for (auto&& [id, doc] : docs_)
-            if ((doc.contains(fields) && ...))
-                docs.emplace_back(id, doc);
-        return docs;
+    ~collection() {
+        for (auto&& ptr : docs_)
+            delete ptr;
     }
 
-    template<class ID, class Vals>
-    insert_result<doc_id, doc_values> insert(ID&& id, Vals&& vals) {
-        auto const [iter, b] = docs_.try_emplace(std::forward<ID>(id), std::forward<Vals>(vals));
+/*
+    [[nodiscard]] bool has_index(std::string const& field) const {
+        return indices_.find(field) != indices_.end();
+    }
+
+    insert_result<std::string, index const> create_index(std::string const& field) {
+        auto const [iter, b] = indices_.try_emplace(field);
         return {iter->first, iter->second, b};
     }
+*/
 
-    insert_result<doc_id, doc_values> insert(document&& doc) {
-        auto const [iter, b] = docs_.try_emplace(std::move(doc.id()), std::move(doc.values()));
-        return {iter->first, iter->second, b};
+    template<template<class, class> class... Tpls, class... Fields, class... Ops>
+    [[nodiscard]] auto scan(Tpls<Fields, Ops>... queries) {
+
+        static_assert(std::conjunction_v<detail::is_string_comparable<Fields>...>);
+        static_assert(std::conjunction_v<std::is_invocable_r<bool, Ops, bson const&>...>);
+
+        std::vector<document*> result;
+
+        auto check_query = [] (auto&& query, auto&& doc) {
+            if (auto const lookup = doc.values().get(std::get<0>(query)); lookup) {
+                auto const [field, val] = *lookup;
+                if (std::get<1>(query)(val))
+                    return true;
+            }
+            return false;
+        };
+
+        for (auto&& doc : docs_) {
+            if ((check_query(queries, *doc) && ...))
+                result.push_back(doc);
+        }
+        return result;
     }
 
-    insert_result<doc_id, doc_values> insert(document const& doc) {
-        auto const [iter, b] = docs_.try_emplace(doc.id(), doc.values());
-        return {iter->first, iter->second, b};
-    }
-
-    remove_result<doc_id, doc_values> remove(bson const& id) {
-        if (auto doc = docs_.extract(id); doc)
-            return {std::move(doc.key()), std::move(doc.mapped())};
+    template<class ID>
+    optional<document&> insert(ID&& id) {
+        auto const [it, inserted] = id_index_.try_emplace(id, nullptr);
+        if (inserted) {
+            // TODO INSERT INTO APPROPRIATE INDICES
+            auto const& doc = docs_.emplace_back(new document(std::forward<ID>(id)));
+            it->second = doc;
+            return {*doc};
+        }
         return {};
+    }
+
+    [[nodiscard]] std::unique_ptr<document> remove(doc_id const& id) {
+        if (auto const it = id_index_.extract(id); it) {
+            docs_.erase(std::find(docs_.begin(), docs_.end(), it.mapped()));
+            // TODO ERASE ALL OCCURANCES FROM INDICES
+            return std::unique_ptr<document>{it.mapped()};
+        }
+        return nullptr;
     }
 
     bool erase(doc_id const& id) {
-        return docs_.erase(id) > 0;
+        if (auto const it = id_index_.find(id); it != id_index_.end()) {
+            DEBUG_ASSERT(it->second);
+            docs_.erase(std::find(docs_.begin(), docs_.end(), it->second));
+            delete it->second;
+            id_index_.erase(id);
+            return true;
+        }
+        return false;
     }
 
-    [[nodiscard]] doc_lookup lookup(doc_id const& id) {
-        if (auto const doc = docs_.find(id); doc != docs_.end())
-            return {doc->first, doc->second};
+    [[nodiscard]] optional<document&> lookup(doc_id const& id) {
+        if (auto const it = id_index_.find(id); it != id_index_.end())
+            return optional<document&>{*(it->second)};
         return {};
     }
 
-    [[nodiscard]] const_doc_lookup lookup(doc_id const& id) const {
-        if (auto const doc = docs_.find(id); doc != docs_.end())
-            return {doc->first, doc->second};
+    [[nodiscard]] optional<document const&> lookup(doc_id const& id) const {
+        if (auto const it = id_index_.find(id); it != id_index_.end())
+            return optional<document const&>{*(it->second)};
         return {};
     }
 
@@ -73,10 +159,10 @@ public:
         return lookup(id);
     }
 
-    auto begin() noexcept { return docs_.begin(); }
-    auto begin() const noexcept { return docs_.begin(); }
-    auto end() noexcept { return docs_.end(); }
-    auto end() const noexcept { return docs_.end(); }
+    [[nodiscard]] collection_iterator begin() noexcept { return docs_.begin(); }
+    [[nodiscard]] collection_const_iterator begin() const noexcept { return docs_.cbegin(); }
+    [[nodiscard]] collection_iterator end() noexcept { return docs_.end(); }
+    [[nodiscard]] collection_const_iterator end() const noexcept { return docs_.cend(); }
 };
 
 } // namespace nova

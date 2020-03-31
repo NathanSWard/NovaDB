@@ -1,7 +1,7 @@
 #ifndef MAP_RESULTS_H
 #define MAP_RESULTS_H
 
-#include "../fmt.hpp"
+#include <fmt/format.h>
 #include "../debug.hpp"
 #include "optional.hpp"
 #include "non_null_ptr.hpp"
@@ -20,21 +20,21 @@ public:
     constexpr valid_lookup(K const& key, V& val) noexcept
         : key_(key), val_(val) {}
 
-    constexpr K const& key() const noexcept { 
+    [[nodiscard]] constexpr K const& key() const noexcept { 
         return key_; 
     }
-    constexpr V& value() noexcept {
+    [[nodiscard]] constexpr V& value() noexcept {
         return val_; 
     }
-    constexpr V const& value() const noexcept {
+    [[nodiscard]] constexpr V const& value() const noexcept {
         return val_; 
     }
 
     template<std::size_t N>
-    decltype(auto) get() const noexcept {
+    [[nodiscard]] decltype(auto) get() const noexcept {
         if constexpr (N == 0)
             return key_;
-        if constexpr (N == 1)
+        else if constexpr (N == 1)
             return val_;
     }
 };
@@ -52,8 +52,8 @@ public:
         , val_(std::addressof(val))
     {}
 
-    constexpr explicit operator bool() const noexcept { return key_ != nullptr; }
-    constexpr valid_lookup<K, V> operator*() const noexcept { 
+    [[nodiscard]] constexpr explicit operator bool() const noexcept { return key_ != nullptr; }
+    [[nodiscard]] constexpr valid_lookup<K, V> operator*() const noexcept { 
         DEBUG_ASSERT(key_);
         return {*key_, *val_}; 
     }
@@ -72,10 +72,10 @@ public:
         , inserted_(inserted) 
     {}
 
-    constexpr bool is_inserted() const noexcept { return inserted_; }
-    constexpr K const& key() const noexcept { return *key_; }
-    constexpr V& value() noexcept { return *val_; }
-    constexpr V const& value() const noexcept { return *val_; }
+    [[nodiscard]] constexpr bool is_inserted() const noexcept { return inserted_; }
+    [[nodiscard]] constexpr K const& key() const noexcept { return *key_; }
+    [[nodiscard]] constexpr V& value() noexcept { return *val_; }
+    [[nodiscard]] constexpr V const& value() const noexcept { return *val_; }
 };
 
 template<class K, class V>
@@ -93,22 +93,22 @@ public:
         : opt_(std::in_place, std::forward<K1>(key), std::forward<V1>(val))
     {}
 
-    constexpr explicit operator bool() const noexcept { return opt_; }
+    [[nodiscard]] constexpr explicit operator bool() const noexcept { return opt_; }
 
-    constexpr K& get_key() { 
+    [[nodiscard]] constexpr K& get_key() { 
         DEBUG_ASSERT(opt_);
         return opt_->first; 
     }
-    constexpr V& get_value() { 
+    [[nodiscard]] constexpr V& get_value() { 
         DEBUG_ASSERT(opt_);
         return opt_->second; 
     }
 
-    constexpr K take_key() { 
+    [[nodiscard]] constexpr K take_key() { 
         DEBUG_ASSERT(opt_);
         return (*std::move(opt_)).first; 
     }
-    constexpr V take_value() { 
+    [[nodiscard]] constexpr V take_value() { 
         DEBUG_ASSERT(opt_);
         return (*std::move(opt_)).second; 
     }

@@ -1,7 +1,7 @@
 #ifndef DOCUMENT_H
 #define DOCUMENT_H
 
-#include "../fmt.hpp"
+#include <fmt/format.h>
 #include "bson.hpp"
 #include "err_result.hpp"
 #include "map_results.hpp"
@@ -32,15 +32,15 @@ public:
         return values_.find(k) != values_.end();
     }
 
-    template<class T, class Key, class... Args>
+    template<class Key, class... Args>
     insert_result<key_t, value_t> insert(Key&& key, Args&&... args) {
-        auto [iter, b] = values_.try_emplace(std::forward<Key>(key), bson_type<T>, std::forward<Args>(args)...);
+        auto [iter, b] = values_.try_emplace(std::forward<Key>(key), std::forward<Args>(args)...);
         return {iter->first, iter->second, b};
     }
 
-    template<class Key, class T>
-    insert_result<key_t, value_t> insert(Key&& key, T&& t) {
-        auto [iter, b] = values_.try_emplace(std::forward<Key>(key), bson_type<T>, std::forward<T>(t));
+    template<class Key, class T, class... Args>
+    insert_result<key_t, value_t> insert(Key&& key, bson_type_t<T>, Args&&... args) {
+        auto [iter, b] = values_.try_emplace(std::forward<Key>(key), bson_type<T>, std::forward<Args>(args)...);
         return {iter->first, iter->second, b};
     }
 
@@ -59,14 +59,14 @@ public:
     template<class Key>
     [[nodiscard]] lookup_result<key_t, value_t> get(Key const& key) {
         if (auto const iter = values_.find(key); iter != values_.end())
-            return lookup_result<key_t const, value_t>{tl::in_place, iter->first, iter->second};
+            return {iter->first, iter->second};
         return {};
     }
 
     template<class Key>
     [[nodiscard]] lookup_result<key_t, value_t const> get(Key const& key) const {
         if (auto const iter = values_.find(key); iter != values_.end())
-            return lookup_result<key_t const, value_t const>{tl::in_place, iter->first, iter->second};
+            return {iter->first, iter->second};
         return {};
     }
 
@@ -100,10 +100,10 @@ public:
         return {err_tag, value_error::Missing};
     }
 
-    auto begin() noexcept { return values_.begin(); }
-    auto begin() const noexcept { return values_.begin(); }
-    auto end() noexcept { return values_.end(); }
-    auto end() const noexcept { return values_.end(); }
+    [[nodiscard]] auto begin() noexcept { return values_.begin(); }
+    [[nodiscard]] auto begin() const noexcept { return values_.begin(); }
+    [[nodiscard]] auto end() noexcept { return values_.end(); }
+    [[nodiscard]] auto end() const noexcept { return values_.end(); }
 
     bool operator==(doc_values const& other) const noexcept {
         return values_ == other.values_;
@@ -113,11 +113,12 @@ public:
 class document {
     using key_t = std::string;
     using value_t = bson;
-    doc_values values_;
+    doc_values values_{};
     doc_id id_;
 public:
-    template<class BsonID, std::enable_if_t<!std::is_same_v<std::decay_t<BsonID>, document>, int> = 0>
-    document(BsonID&& id) : id_(std::forward<BsonID>(id)) {}
+
+    template<class T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, document>, int> = 0>
+    document(T&& t) : id_(std::forward<T>(t)) {}
 
     document(document const&) = default;
     document(document&&) = default;

@@ -3,7 +3,7 @@
 
 // TODO: add rest of bson types
 
-#include "../fmt.hpp"
+#include <fmt/format.h>
 #include "detail.hpp"
 #include "optional.hpp"
 #include "unique_id.hpp"
@@ -34,9 +34,10 @@ public:
         UniqueID, Null, Bool, Int32, Int64, uInt32, uInt64, Float, Double, String, Array, Document
     };
 private:
-    std::variant<unique_id, null_t, bool, std::int32_t, std::int64_t, std::uint32_t, std::uint64_t, float, double, std::string, array_t, detail::recursive_wrapper<document>> storage_;
-    friend class std::hash<bson>;
-    friend class fmt::formatter<bson>;
+    std::variant<unique_id, null_t, bool, std::int32_t, std::int64_t, std::uint32_t, std::uint64_t, 
+        float, double, std::string, array_t, detail::recursive_wrapper<document>> storage_;
+    friend struct std::hash<bson>;
+    friend struct fmt::formatter<bson>;
 
     template<class T>
     static constexpr bool is_valid_type = std::disjunction_v<std::is_same<T, unique_id>,
@@ -48,12 +49,15 @@ private:
             std::is_same<T, document>>;
 
 public:
-    template<class T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, bson>, int> = 0>
+    template<class T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, bson> && std::is_constructible_v<std::string, T>, int> = 0>
+    bson(T&& str) : bson(bson_type<std::string>, std::forward<T>(str)) {}
+
+    template<class T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, bson> && !std::is_constructible_v<std::string, T>, int> = 0>
     bson(T&& t) : bson(bson_type<T>, std::forward<T>(t)) {}
 
     template<class T, class... Args>
     bson(bson_type_t<T>, Args&&... args) 
-        : storage_(std::in_place_type<detail::check_recursive_t<std::remove_cv_t<std::remove_reference_t<T>>, document>>, std::forward<Args>(args)...)
+        : storage_(std::in_place_type<detail::check_recursive_t<std::decay_t<T>, document>>, std::forward<Args>(args)...)
     {
         static_assert(is_valid_type<std::remove_cv_t<std::remove_reference_t<T>>>);
     }
@@ -83,8 +87,77 @@ public:
         return {};
     }
 
+    template<class T>
+    [[nodiscard]] bool equals_strong(T const& t) const noexcept {
+        static_assert(is_valid_type<T>);
+        if (auto const val = as<T>(); val)
+            return *val == t;
+        return false;
+    }
+
+    template<class T>
+    [[nodiscard]] constexpr bool equals_weak(T const& t) const noexcept {
+        if constexpr (std::is_integral_v<T>) {
+            switch (type()) {
+                case types::Bool: return std::get<bool>(storage_) == t;
+                case types::Int32: return std::get<std::int32_t>(storage_) == t;
+                case types::Int64: return std::get<std::int64_t>(storage_) == t;
+                case types::uInt32: return std::get<std::uint32_t>(storage_) == t;
+                case types::uInt64: return std::get<std::uint64_t>(storage_) == t;
+                case types::Float: return std::get<float>(storage_) == t;
+                case types::Double: return std::get<double>(storage_) == t;
+                default: return false;
+            }
+        }
+        else if constexpr (std::is_same_v<unique_id, T>) {
+            switch(type()) {
+                case types::UniqueID: return std::get<unique_id>(storage_) == t;
+                default: return false;
+            }
+        }
+        else if constexpr (std::is_same_v<null_t, T>) {
+            switch(type()) {
+                case types::Null: return true;
+                default: return false;
+            }
+        }
+        else if constexpr (std::is_same_v<array_t, T>) {
+            switch (type()) {
+                case types::Array: return std::get<array_t>(storage_) == t;
+                default: return false;
+            }
+        }
+        else if constexpr (std::is_same_v<document, T>) {
+            switch (type()) {
+                case types::Document: return std::get<detail::recursive_wrapper<document>>(storage_).get() == t;
+                default: return false;
+            }
+        }
+        else if constexpr (detail::is_string_comparable_v<T>) {
+            switch (type()) {
+                case types::String: return std::get<std::string>(storage_) == t;
+                default: return false;
+            }
+        }
+        else {
+            static_assert(detail::always_false<T>::value);
+            return false;
+        }
+    }
+
     constexpr bool operator==(bson const& other) const noexcept {
         return storage_ == other.storage_;
+    }
+
+    constexpr bool operator<(bson const& other) const noexcept {
+        DEBUG_ASSERT(type() == other.type());
+        std::visit(detail::overloaded{
+            [](null_t) { DEBUG_ASSERT(false); return true; },
+            [](detail::recursive_wrapper<document> const&) { DEBUG_ASSERT(false); return true; },
+            [&other](auto&& val) { 
+                return val < std::get<std::remove_cv_t<std::remove_reference_t<decltype(val)>>>(other.storage_); 
+            }
+        }, storage_);
     }
 };
 

@@ -1,10 +1,59 @@
 #ifndef INTERNAL_DETAIL_H
 #define INTERNAL_DETAIL_H
 
+#include <algorithm>
 #include <memory>
 #include <type_traits>
 
 namespace nova::detail {
+
+template<typename It, typename T, typename Cmp = std::less<>>
+constexpr auto lower_bound(It first, It const last, T const& val, Cmp cmp = {}) {
+    auto len = std::distance(first, last);
+    while (len > 0) {
+        auto half = len >> 1;
+        It middle = first;
+        std::advance(middle, half);
+        if (comp(*middle, val)) {
+            first = middle;
+            ++first;
+            len = len - half - 1;
+        }
+        else
+            len = half;
+    }
+    return first;
+}
+
+template<class It, class T, class Cmp>
+auto binary_search(It first, It const last, T const& val, Cmp cmp) {
+    first = nova::detail::lower_bound(first, last, val, cmp);
+    return first == last ? last : first;
+}
+
+template<class It, class T>
+auto binary_search(It first, It const last, T const& val) {
+    first = nova::detail::lower_bound(first, last, val);
+    return first == last ? last : first;
+}
+
+template<class T>
+struct is_string_comparable {
+    template<class U>
+    static auto test(int) -> decltype(std::declval<std::string const&>() == std::declval<U const&>(), std::true_type{});
+    template<class>
+    static std::false_type test(...);
+
+    static constexpr bool value = decltype(test<T>(0))::value;
+};
+
+template<class T>
+static constexpr bool is_string_comparable_v = is_string_comparable<T>::value;
+
+template<class T>
+struct always_false {
+    static constexpr bool value = !std::is_same_v<T, T>;
+};
 
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;

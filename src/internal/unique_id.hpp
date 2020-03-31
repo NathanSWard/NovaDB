@@ -2,7 +2,7 @@
 #define UNIQUE_ID_H
 
 #include "../debug.hpp"
-#include "../fmt.hpp"
+#include <fmt/format.h>
 
 #include <atomic>
 #include <chrono>
@@ -83,6 +83,10 @@ public:
 
     constexpr bool operator==(unique_id const& other) const noexcept {
         return time_ == other.time_ && u64_ == other.u64_;
+    }
+
+    constexpr bool operator<(unique_id const& other) const noexcept {
+        return time_ < other.time_ && u64_ < other.u64_;
     }
 
     [[nodiscard]] constexpr auto time_point() const noexcept {
