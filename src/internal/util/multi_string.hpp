@@ -20,14 +20,14 @@ public:
         char** pos = reinterpret_cast<char**>(storage_);
         char* string = reinterpret_cast<char*>(reinterpret_cast<char**>(storage_) + size_of_positions);
 
-        auto lambda = [&](auto&& view) {
+        auto lambda = [&](std::string_view view) {
             *pos = string;
             std::memcpy(string, view.data(), view.size());
             string += view.size();
             ++pos;
         };
 
-        (lambda(std::string_view{views}), ...);
+        (lambda(views), ...);
         *pos = string;
 
         static_assert(std::conjunction_v<std::is_constructible<std::string_view, Views>...>);
