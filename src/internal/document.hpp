@@ -1,10 +1,10 @@
-#ifndef DOCUMENT_H
-#define DOCUMENT_H
+#ifndef NOVA_DOCUMENT_HPP
+#define NOVA_DOCUMENT_HPP
 
 #include <fmt/format.h>
 #include "bson.hpp"
-#include "err_result.hpp"
-#include "map_results.hpp"
+#include "util/err_result.hpp"
+#include "util/map_results.hpp"
 
 #include <cstring>
 #include <string>
@@ -173,5 +173,5 @@ struct fmt::formatter<nova::document> {
     }
 };
 
-#endif // DOCUMENT_H
+#endif // NOVA_DOCUMENT_HPP
 

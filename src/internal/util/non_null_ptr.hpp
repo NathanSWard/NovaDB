@@ -1,5 +1,7 @@
-#ifndef NON_NULL_PTR_H
-#define NON_NULL_PTR_H
+#ifndef NOVA_NON_NULL_PTR_HPP
+#define NOVA_NON_NULL_PTR_HPP
+
+#include "../../debug.hpp"
 
 #include <cstddef>
 
@@ -11,7 +13,9 @@ class non_null_ptr {
 public:
     non_null_ptr(std::nullptr_t) = delete;
 
-    constexpr non_null_ptr(T* ptr) noexcept : ptr_(ptr) {}
+    constexpr non_null_ptr(T* ptr) noexcept : ptr_(ptr) {
+        DEBUG_ASSERT(ptr);
+    }
     constexpr non_null_ptr(non_null_ptr const&) noexcept = default;
     constexpr non_null_ptr(non_null_ptr&&) noexcept = default;
 
@@ -25,4 +29,4 @@ public:
 
 } // namespace nova
 
-#endif // NON_NULL_PTR_H
+#endif // NOVA_NON_NULL_PTR_HPP

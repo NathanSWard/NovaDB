@@ -1,12 +1,13 @@
-#ifndef COLLECTION_H
-#define COLLECTION_H
+#ifndef NOVA_COLLECTION_HPP
+#define NOVA_COLLECTION_HPP
 
 #include "bson.hpp"
 #include "../debug.hpp"
 #include "document.hpp"
 #include "index.hpp"
-#include "map_results.hpp"
-#include "non_null_ptr.hpp"
+#include "index_manager.hpp"
+#include "util/map_results.hpp"
+#include "util/non_null_ptr.hpp"
 
 #include <tuple>
 #include <unordered_map>
@@ -15,39 +16,39 @@ namespace nova {
 
 class collection;
 
- class collection_iterator {
-        decltype(std::declval<std::vector<document*>>().begin()) it_;
-        using iter_type = decltype(it_);
-    public:
-        using value_type = document;
-        using reference = document&;
-        using iterator_category = iter_type::iterator_category;
-        using difference_type = iter_type::difference_type;
-        
-        constexpr collection_iterator(iter_type it) noexcept : it_(it) {}
-        
-        auto operator++() { ++it_; return *this; }
-        reference operator*() { return **it_; }
-        bool operator==(collection_iterator const& rhs) const noexcept { return it_ == rhs.it_; }
-        bool operator!=(collection_iterator const& rhs) const noexcept { return it_ != rhs.it_; }
-    };
+class collection_iterator {
+    decltype(std::declval<std::vector<document*>>().begin()) it_;
+    using iter_type = decltype(it_);
+public:
+    using value_type = document;
+    using reference = document&;
+    using iterator_category = iter_type::iterator_category;
+    using difference_type = iter_type::difference_type;
+    
+    constexpr collection_iterator(iter_type it) noexcept : it_(it) {}
+    
+    auto operator++() { ++it_; return *this; }
+    reference operator*() { return **it_; }
+    bool operator==(collection_iterator const& rhs) const noexcept { return it_ == rhs.it_; }
+    bool operator!=(collection_iterator const& rhs) const noexcept { return it_ != rhs.it_; }
+};
 
-    class collection_const_iterator {
-        decltype(std::declval<std::vector<document*>>().cbegin()) it_;
-        using iter_type = decltype(it_);
-    public:
-        using value_type = document;
-        using reference = document const&;
-        using iterator_category = iter_type::iterator_category;
-        using difference_type = iter_type::difference_type;
-        
-        constexpr collection_const_iterator(iter_type it) noexcept : it_(it) { }
-        
-        auto operator++() { ++it_; return *this; }
-        reference operator*() { return **it_; }
-        bool operator==(collection_const_iterator const& rhs) const noexcept { return it_ == rhs.it_; }
-        bool operator!=(collection_const_iterator const& rhs) const noexcept { return it_ != rhs.it_; }
-    };
+class collection_const_iterator {
+    decltype(std::declval<std::vector<document*>>().cbegin()) it_;
+    using iter_type = decltype(it_);
+public:
+    using value_type = document;
+    using reference = document const&;
+    using iterator_category = iter_type::iterator_category;
+    using difference_type = iter_type::difference_type;
+    
+    constexpr collection_const_iterator(iter_type it) noexcept : it_(it) { }
+    
+    auto operator++() { ++it_; return *this; }
+    reference operator*() { return **it_; }
+    bool operator==(collection_const_iterator const& rhs) const noexcept { return it_ == rhs.it_; }
+    bool operator!=(collection_const_iterator const& rhs) const noexcept { return it_ != rhs.it_; }
+};
 
 class query_result {
     std::vector<document*> docs_{};
@@ -61,8 +62,8 @@ public:
 
 class collection {
     std::vector<document*> docs_{};
-    unordered_unique_index id_index_{};
-    //std::unordered_map<std::string, index> indices_{};
+    std::unordered_map<bson, document*> id_index_{};
+    index_manager index_manager_;
 
 public:
     collection() = default;
@@ -71,17 +72,6 @@ public:
         for (auto&& ptr : docs_)
             delete ptr;
     }
-
-/*
-    [[nodiscard]] bool has_index(std::string const& field) const {
-        return indices_.find(field) != indices_.end();
-    }
-
-    insert_result<std::string, index const> create_index(std::string const& field) {
-        auto const [iter, b] = indices_.try_emplace(field);
-        return {iter->first, iter->second, b};
-    }
-*/
 
     template<template<class, class> class... Tpls, class... Fields, class... Ops>
     [[nodiscard]] auto scan(Tpls<Fields, Ops>... queries) {
@@ -134,6 +124,7 @@ public:
             docs_.erase(std::find(docs_.begin(), docs_.end(), it->second));
             delete it->second;
             id_index_.erase(id);
+            // TODO ERASE ALL OCCURANCES FROM INDICES
             return true;
         }
         return false;
@@ -167,4 +158,4 @@ public:
 
 } // namespace nova
 
-#endif // COLLECTION_H
+#endif // NOVA_COLLECTION_HPP

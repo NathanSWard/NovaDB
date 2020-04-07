@@ -1,11 +1,37 @@
-#ifndef INTERNAL_DETAIL_H
-#define INTERNAL_DETAIL_H
+#ifndef NOVA_INTERNAL_DETAIL_HPP
+#define NOVA_INTERNAL_DETAIL_HPP
 
 #include <algorithm>
 #include <memory>
 #include <type_traits>
 
 namespace nova::detail {
+
+template<class T>
+struct is_iterator_like  {
+    template<class U>
+    static auto test(int) -> decltype(std::advance(std::declval<U&>(), 1), *std::declval<U>(), std::true_type{});
+    template<class>
+    static std::false_type test(...);
+
+    static constexpr bool value = decltype(test<T>(0))::value;
+};
+
+template<class T>
+inline static constexpr bool is_iterator_like_v = is_iterator_like<T>::value;
+
+template<class T>
+struct is_container_like  {
+    template<class U>
+    static auto test(int) -> decltype(std::declval<U>().size(), std::declval<U>().data(), std::true_type{});
+    template<class>
+    static std::false_type test(...);
+
+    static constexpr bool value = decltype(test<T>(0))::value;
+};
+
+template<class T>
+inline static constexpr bool is_container_like_v = is_container_like<T>::value;
 
 template<typename It, typename T, typename Cmp = std::less<>>
 constexpr auto lower_bound(It first, It const last, T const& val, Cmp cmp = {}) {
@@ -98,4 +124,4 @@ using check_recursive_t = std::conditional_t<std::is_same_v<T, U>, recursive_wra
 
 } // namespace nova::detail
 
-#endif // INTERNAL_DETAIL_H
+#endif // NOVA_INTERNAL_DETAIL_HPP

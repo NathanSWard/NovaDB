@@ -1,8 +1,8 @@
-#ifndef DATABASE_H
-#define DATABASE_H
+#ifndef NOVA_DATABASE_HPP
+#define NOVA_DATABASE_HPP
 
 #include "collection.hpp"
-#include "map_results.hpp"
+#include "util/map_results.hpp"
 
 #include <memory>
 #include <vector>
@@ -59,4 +59,4 @@ public:
 
 } // namespace nova
 
-#endif // DATABASE_H
+#endif // NOVA_DATABASE_HPP

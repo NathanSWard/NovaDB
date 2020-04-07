@@ -1,8 +1,8 @@
-#ifndef MAP_RESULTS_H
-#define MAP_RESULTS_H
+#ifndef NOVA_MAP_RESULTS_HPP
+#define NOVA_MAP_RESULTS_HPP
 
 #include <fmt/format.h>
-#include "../debug.hpp"
+#include "../../debug.hpp"
 #include "optional.hpp"
 #include "non_null_ptr.hpp"
 
@@ -53,6 +53,12 @@ public:
     {}
 
     [[nodiscard]] constexpr explicit operator bool() const noexcept { return key_ != nullptr; }
+    [[nodiscard]] constexpr K const& key() const noexcept {
+        return *key_;
+    }
+    [[nodiscard]] constexpr V& value() const noexcept {
+        return *val_;
+    }
     [[nodiscard]] constexpr valid_lookup<K, V> operator*() const noexcept { 
         DEBUG_ASSERT(key_);
         return {*key_, *val_}; 
@@ -131,4 +137,4 @@ namespace std {
     };
 }
 
-#endif // MAP_RESULTS_H
+#endif // NOVA_MAP_RESULTS_HPP

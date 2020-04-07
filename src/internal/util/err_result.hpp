@@ -1,5 +1,5 @@
-#ifndef RESULT_H
-#define RESULT_H
+#ifndef NOVA_ERR_RESULT_HPP
+#define NOVA_ERR_RESULT_HPP
 
 #include <type_traits>
 #include <utility>
@@ -60,4 +60,4 @@ public:
 
 } // namespace nova
 
-#endif // RESULT_H
+#endif // NOVA_ERR_RESULT_HPP

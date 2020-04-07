@@ -1,11 +1,11 @@
-#ifndef BSON_H
-#define BSON_H
+#ifndef NOVA_BSON_HPP
+#define NOVA_BSON_HPP
 
 // TODO: add rest of bson types
 
 #include <fmt/format.h>
 #include "detail.hpp"
-#include "optional.hpp"
+#include "util/optional.hpp"
 #include "unique_id.hpp"
 
 #include <functional>
@@ -234,5 +234,5 @@ namespace std {
     };
 } // namespace std
 
-#endif // BSON_H
+#endif // NOVA_BSON_HPP
 
