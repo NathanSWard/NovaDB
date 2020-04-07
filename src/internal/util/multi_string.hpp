@@ -10,7 +10,7 @@ class multi_string {
     char* storage_ = nullptr;
     std::size_t size_;
 public:
-    template<class... Views>
+    template<class... Views, std::enable_if_t<std::conjunction_v<std::is_constructible<std::string_view, Views>...>, int> = 0>
     multi_string(Views&&... views)
         : size_(sizeof...(Views))
     {
@@ -29,8 +29,17 @@ public:
 
         (lambda(views), ...);
         *pos = string;
+    }
 
-        static_assert(std::conjunction_v<std::is_constructible<std::string_view, Views>...>);
+    multi_string(multi_string&& other) noexcept
+        : storage_(std::exchange(other.storage_, nullptr))
+        , size_(other.size_)
+    {}
+
+    multi_string& operator=(multi_string&& other) noexcept {
+        delete[] storage_;
+        storage_ = std::exchange(other.storage_, nullptr);
+        size_ = other.size_;
     }
 
     ~multi_string() { delete[] storage_; }
@@ -46,20 +55,20 @@ public:
 
     struct sentinel{};
 
-    class iter {
+    class iterator {
         multi_string const* ref_;
         std::size_t pos_{0};
     public:
-        constexpr iter(multi_string const& ref) noexcept : ref_(std::addressof(ref)) {}
+        constexpr iterator(multi_string const& ref) noexcept : ref_(std::addressof(ref)) {}
         auto operator*() { return ref_->operator[](pos_); }
-        constexpr iter& operator++() noexcept { ++pos_; return *this; }
+        constexpr iterator& operator++() noexcept { ++pos_; return *this; }
 
         bool operator!=(sentinel const) const noexcept {
             return pos_ < ref_->size();
         }
     };
 
-    auto begin() const noexcept { return iter{*this}; }
+    auto begin() const noexcept { return iterator{*this}; }
     constexpr auto end() const noexcept { return sentinel{}; }
 
     bool operator==(multi_string const& other) const noexcept {
