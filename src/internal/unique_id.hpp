@@ -1,5 +1,5 @@
-#ifndef UNIQUE_ID_H
-#define UNIQUE_ID_H
+#ifndef NOVA_UNIQUE_ID_HPP
+#define NOVA_UNIQUE_ID_HPP
 
 #include "../debug.hpp"
 #include <fmt/format.h>
@@ -130,4 +130,4 @@ namespace std {
     };
 }
 
-#endif // UNIQUE_ID_H
+#endif // NOVA_UNIQUE_ID_HPP
