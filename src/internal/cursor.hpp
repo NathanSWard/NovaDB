@@ -10,21 +10,22 @@
 namespace nova {
 
 namespace {
-    static constexpr std::size_t largest_gen_size = sizeof(std::vector<document*>);
+    inline static constexpr std::size_t largest_gen_size = sizeof(std::vector<document*>);
 }
 
-class cursor {
-    using gen_t = inplace_function<optional<document&>(), largest_gen_size>;
+template<class T>
+class basic_cursor {
+    using gen_t = inplace_function<optional<T&>(), largest_gen_size>;
     gen_t gen_;
 public:
-    template<class Fn, std::enable_if_t<!std::is_same_v<std::decay_t<Fn>, cursor>, int> = 0>
-    constexpr cursor(Fn&& fn) : gen_(std::forward<Fn>(fn)) {}
+    template<class Fn, std::enable_if_t<!std::is_same_v<std::decay_t<Fn>, basic_cursor>, int> = 0>
+    constexpr basic_cursor(Fn&& fn) : gen_(std::forward<Fn>(fn)) {}
 
     struct sentinel {};
     class iterator {
         gen_t gen_;
-        optional<document&> opt_;
-        iterator(gen_t const& gen, optional<document&> opt)
+        optional<T&> opt_;
+        iterator(gen_t const& gen, optional<T&> opt)
             : gen_(gen), opt_(opt) {}
     public:
         explicit constexpr iterator(gen_t const& gen) 
@@ -38,11 +39,11 @@ public:
             return *this;
         }
 
-        [[nodiscard]] constexpr document& operator*() noexcept {
+        [[nodiscard]] constexpr T& operator*() noexcept {
             return *opt_;
         }
 
-        [[nodiscard]] constexpr document* operator->() noexcept {
+        [[nodiscard]] constexpr T* operator->() noexcept {
             return std::addressof(*opt_);
         }
 
@@ -56,120 +57,61 @@ public:
     [[nodiscard]] constexpr auto end() const noexcept { return sentinel{}; }
 };
 
-class const_cursor {
-    using gen_t = inplace_function<optional<document const&>(), largest_gen_size>;
-    gen_t gen_;
-public:
-    template<class Fn, std::enable_if_t<!std::is_same_v<std::decay_t<Fn>, const_cursor>, int> = 0>
-    constexpr const_cursor(Fn&& fn) : gen_(std::forward<Fn>(fn)) {}
+using cursor = basic_cursor<document>;
+using const_cursor = basic_cursor<document const>;
 
-    struct sentinel {};
-    class iterator {
-        gen_t gen_;
-        optional<document const&> opt_;
-    public:
-        explicit constexpr iterator(gen_t const& gen) 
-            : gen_(gen), opt_(gen_()) {}
+template<class T>
+inline static constexpr auto zero_index_lookup = []() -> optional<T&> { return {}; };
 
-        explicit constexpr iterator(gen_t&& gen) noexcept
-            : gen_(std::move(gen)), opt_(gen_()) {}
-
-        iterator& operator++() {
-            opt_ = gen_();
-            return *this;
-        }
-
-        [[nodiscard]] constexpr document const& operator*() noexcept {
-            return *opt_;
-        }
-
-        [[nodiscard]] constexpr document const* operator->() noexcept {
-            return std::addressof(*opt_);
-        }
-
-        [[nodiscard]] constexpr bool operator!=(sentinel const) const noexcept {
-            return opt_.has_value();
-        }
-    };
-
-    [[nodiscard]] auto begin() const& { return iterator{gen_}; }
-    [[nodiscard]] auto begin() && { return iterator{std::move(gen_)}; }
-    [[nodiscard]] constexpr auto end() const noexcept { return sentinel{}; }
-};
-
-inline static constexpr auto zero_index_lookup = []() -> optional<document&> { return {}; };
-inline static constexpr auto zero_index_lookup_const = []() -> optional<document const&> { return {}; };
-
+template<class T>
 class single_index_lookup {
-    document* doc_;
+    T* t_;
 public:
-    explicit constexpr single_index_lookup(document* const doc) noexcept : doc_(doc) {}
+    explicit constexpr single_index_lookup(T* const t) noexcept : t_(t) {}
 
-    [[nodiscard]] constexpr optional<document&> operator()() noexcept {
-        if (doc_) {
-            document* const doc = std::exchange(doc_, nullptr);
-            return {*doc};
+    [[nodiscard]] constexpr optional<T&> operator()() noexcept {
+        if (t_) {
+            T* const tmp = std::exchange(t_, nullptr);
+            return {*tmp};
         }
         return {};
     }
 };
 
-class single_index_lookup_const {
-    document const* doc_;
-public:
-    explicit constexpr single_index_lookup_const(document const* const doc) noexcept : doc_(doc) {}
+template<class T>
+single_index_lookup(T* const) -> single_index_lookup<T>;
 
-    [[nodiscard]] constexpr optional<document const&> operator()() noexcept {
-        if (doc_) {
-            document const* const doc = std::exchange(doc_, nullptr);
-            return {*doc};
-        }
-        return {};
+struct deref_map_iter_second {
+    template<class It>
+    constexpr decltype(auto) operator()(It&& it) const noexcept {
+        return *(it->second);
     }
 };
 
-template<auto Deref, class First, class Last = First>
+template<class T, class First, class Last = First, class Deref = deref_map_iter_second>
 class multiple_index_lookup_iter {
     First first_;
     Last const last_;
 public:
-    static_assert(std::is_invocable_r_v<document&, decltype(Deref), First>);
-
     constexpr explicit multiple_index_lookup_iter(First const first, Last const last) noexcept
         : first_(first), last_(last) {}
 
-    [[nodiscard]] constexpr optional<document&> operator()() noexcept {
+    [[nodiscard]] constexpr optional<T&> operator()() noexcept {
         if (first_ != last_) {
             auto const it = first_;
             std::advance(first_, 1);
-            return {Deref(it)};
+            return {Deref{}(it)};
         }
         return {};
     }
 };
 
-template<auto Deref, class First, class Last = First>
-class multiple_index_lookup_iter_const {
-    First first_;
-    Last const last_;
-public:
-    static_assert(std::is_invocable_r_v<document const&, decltype(Deref), First>);
+template<class T, class First, class Last, class Deref>
+multiple_index_lookup_iter(First, Last) -> multiple_index_lookup_iter<T, First, Last, Deref>;
 
-    constexpr explicit multiple_index_lookup_iter_const(First const first, Last const last) noexcept
-        : first_(first), last_(last) {}
-
-    [[nodiscard]] constexpr optional<document const&> operator()() noexcept {
-        if (first_ != last_) {
-            auto const it = first_;
-            std::advance(first_, 1);
-            return {Deref(it)};
-        }
-        return {};
-    }
-};
-
+template<class T>
 class multiple_index_lookup_vec {
-    std::vector<document*> vec_;
+    std::vector<T*> vec_;
 public:
     template<class V, std::enable_if_t<!std::is_same_v<V, multiple_index_lookup_vec>, int> = 0>
     explicit multiple_index_lookup_vec(V&& v) 
@@ -178,7 +120,7 @@ public:
         // std::reverse(vec_.begin(), vec_.end()); maybe?
     }
 
-    [[nodiscard]] optional<document&> operator()() noexcept {
+    [[nodiscard]] optional<T&> operator()() noexcept {
         if (!vec_.empty()) {
             auto const doc = vec_.back();
             vec_.pop_back();
@@ -188,25 +130,8 @@ public:
     }
 };
 
-class multiple_index_lookup_vec_const {
-    std::vector<document const*> vec_;
-public:
-    template<class V, std::enable_if_t<!std::is_same_v<V, multiple_index_lookup_vec>, int> = 0>
-    explicit multiple_index_lookup_vec_const(V&& v) 
-        : vec_(std::forward<V>(v)) 
-    {
-        // std::reverse(vec_.begin(), vec_.end()); maybe?
-    }
-
-    [[nodiscard]] optional<document const&> operator()() noexcept {
-        if (!vec_.empty()) {
-            auto const doc = vec_.back();
-            vec_.pop_back();
-            return {*doc};
-        }
-        return {};
-    }
-};
+template<template<class> class V, class T>
+multiple_index_lookup_vec(V<T*>) -> multiple_index_lookup_vec<T>;
 
 } // namespace nova
 

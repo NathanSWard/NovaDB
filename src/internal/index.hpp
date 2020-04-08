@@ -15,15 +15,6 @@
 
 namespace nova {
 
-namespace detail {
-
-template<class It>
-[[nodiscard]] inline constexpr decltype(auto) deref_map_iter(It const& it) noexcept(noexcept(*(it->second))) {
-    return *(it->second);
-}
-
-} // namespace detail
-
 struct no_filter {
     template<class T>
     constexpr bool operator()(T&&) const noexcept { return true; }
@@ -97,6 +88,12 @@ class basic_single_field_unique_index final : public single_field_unique_index_i
     }
 public:
     basic_single_field_unique_index() = default;
+    
+    template<class Fn, std::enable_if_t<!std::is_same_v<std::decay_t<Fn>, basic_single_field_unique_index>, int> = 0>
+    basic_single_field_unique_index(Fn&& fn)
+        : Filter(std::forward<Fn>(fn))
+    {}
+
     ~basic_single_field_unique_index() = default;
 
     index_insert_result insert(bson const& val, document* const doc) final {
@@ -126,7 +123,7 @@ public:
                 vec.push_back(k);
         }
         if (vec.empty())
-            return zero_index_lookup;
+            return zero_index_lookup<document>;
         else if (vec.size() == 1)
             return single_index_lookup{vec.front()};
         else
@@ -140,11 +137,11 @@ public:
                 vec.push_back(k);
         }
         if (vec.empty())
-            return zero_index_lookup_const;
+            return zero_index_lookup<document const>;
         else if (vec.size() == 1)
-            return single_index_lookup_const{vec.front()};
+            return single_index_lookup{vec.front()};
         else
-            return multiple_index_lookup_vec_const{std::move(vec)};
+            return multiple_index_lookup_vec{std::move(vec)};
     }
 
     std::size_t erase(bson const& val) final {
@@ -205,14 +202,14 @@ public:
 
     [[nodiscard]] cursor lookup_many(bson const& val) final {
         if (auto const [first, last] = map_.equal_range(val); first != map_.end())
-            return multiple_index_lookup_iter<&detail::deref_map_iter<map_iter_t>, map_iter_t>{first, last};
-        return zero_index_lookup;
+            return multiple_index_lookup_iter<document, map_iter_t>{first, last};
+        return zero_index_lookup<document>;
     }
 
     [[nodiscard]] const_cursor lookup_many(bson const& val) const final {
         if (auto const [first, last] = map_.equal_range(val); first != map_.end())
-            return multiple_index_lookup_iter_const<&detail::deref_map_iter<const_map_iter_t>, const_map_iter_t>{first, last};
-        return zero_index_lookup_const;
+            return multiple_index_lookup_iter<document const, const_map_iter_t>{first, last};
+        return zero_index_lookup<document const>;
     }
 
     [[nodiscard]] cursor lookup_if(function_ref<bool(bson const&)> fn) final {
@@ -223,7 +220,7 @@ public:
         }
 
         if (vec.empty())
-            return zero_index_lookup;
+            return zero_index_lookup<document>;
         else if (vec.size() == 1)
             return single_index_lookup{vec.front()};
         else
@@ -238,11 +235,11 @@ public:
         }
 
         if (vec.empty())
-            return zero_index_lookup_const;
+            return zero_index_lookup<document const>;
         else if (vec.size() == 1)
-            return single_index_lookup_const{vec.front()};
+            return single_index_lookup{vec.front()};
         else
-            return multiple_index_lookup_vec_const{std::move(vec)};
+            return multiple_index_lookup_vec{std::move(vec)};
     }
 
     std::size_t erase(bson const& val) final {
@@ -371,7 +368,7 @@ public:
             if (fn(k))
                 docs.push_back(v);
         if (docs.empty())
-            return zero_index_lookup;
+            return zero_index_lookup<document>;
         else if (docs.size() == 1)
             return single_index_lookup{docs.front()};
         else
@@ -384,11 +381,11 @@ public:
             if (fn(k))
                 docs.push_back(v);
         if (docs.empty())
-            return zero_index_lookup_const;
+            return zero_index_lookup<document const>;
         else if (docs.size() == 1)
-            return single_index_lookup_const{docs.front()};
+            return single_index_lookup{docs.front()};
         else
-            return multiple_index_lookup_vec_const{std::move(docs)};
+            return multiple_index_lookup_vec{std::move(docs)};
     }
 
     bool erase(span<bson> s) final {
@@ -451,14 +448,14 @@ public:
 
     [[nodiscard]] cursor lookup_many(span<bson const> const vals) final {
         if (auto const [first, last] = map_.equal_range(vals); first != map_.end())
-            return multiple_index_lookup_iter<&detail::deref_map_iter<map_iter_t>, map_iter_t>{first, last};
-        return zero_index_lookup;
+            return multiple_index_lookup_iter<document, map_iter_t>{first, last};
+        return zero_index_lookup<document>;
     }
 
     [[nodiscard]] const_cursor lookup_many(span<bson const> const vals) const final {
         if (auto const [first, last] = map_.equal_range(vals); first != map_.end())
-            return multiple_index_lookup_iter_const<&detail::deref_map_iter<const_map_iter_t>, const_map_iter_t>{first, last};
-        return zero_index_lookup_const;
+            return multiple_index_lookup_iter<document const, const_map_iter_t>{first, last};
+        return zero_index_lookup<document const>;
     }
 
     [[nodiscard]] cursor lookup_if(function_ref<bool(span<bson const>)> fn) final {
@@ -467,7 +464,7 @@ public:
             if (fn(k))
                 docs.push_back(v);
         if (docs.empty())
-            return zero_index_lookup;
+            return zero_index_lookup<document>;
         else if (docs.size() == 1)
             return single_index_lookup{docs.front()};
         else
@@ -480,11 +477,11 @@ public:
             if (fn(k))
                 docs.push_back(v);
         if (docs.empty())
-            return zero_index_lookup_const;
+            return zero_index_lookup<document const>;
         else if (docs.size() == 1)
-            return single_index_lookup_const{docs.front()};
+            return single_index_lookup{docs.front()};
         else
-            return multiple_index_lookup_vec_const{std::move(docs)};
+            return multiple_index_lookup_vec{std::move(docs)};
     }
 
     std::size_t erase(span<bson const> s) final { // todo maybe take span<bson*> to avoid copy
