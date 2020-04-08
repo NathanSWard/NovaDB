@@ -1,6 +1,7 @@
 #ifndef NOVA_INDEX_MANAGER_HPP
 #define NOVA_INDEX_MANAGER_HPP
 
+#include "detail.hpp"
 #include "index.hpp"
 #include "util/multi_string.hpp"
 
@@ -49,12 +50,52 @@ enum class index_type : std::uint8_t {
     compound_multi,
 };
 
+enum class create_index_result : std::uint8_t {
+    success,
+    already_exists,
+    invalid_args,
+};
+
+struct create_index_args {
+    bool unique = true;
+    std::size_t field_count = 1;
+};
+
 class index_manager {
     single_field_index_map<single_field_unique_index_interface> sfu_;
     single_field_index_map<single_field_multi_index_interface> sfm_;
     compound_index_map<compound_unique_index_interface> cu_;
     compound_index_map<compound_multi_index_interface> cm_;
 public:
+    template<class Filter = no_filter, class... Fields>
+    bool create_index(bool const unique, Fields&&... fields) {
+        static_assert(std::conjunction_v<std::is_constructible<std::string, Fields>...>);
+
+        if constexpr (sizeof...(Fields) == 0) {
+            static_assert(detail::always_false<Filter>::value);
+        }
+        else if constexpr (sizeof...(Fields) == 1) { // single field index
+            if (unique) {
+                sfu_.try_emplace(std::forward<Fields>(fields)...,
+                                 std::make_unique<ordered_single_field_unqiue_index<Filter>>());
+            }
+            else { // multi
+                sfm_.try_emplace(std::forward<Fields>(fields)...,
+                                 std::make_unique<ordered_single_field_multi_index<Filter>>());
+            }
+        } 
+        else { // compound index
+            if (unique) {
+                cu_.try_emplace(multi_string{std::forward<Fields>(fields)...},
+                                std::make_unique<ordered_compound_unique_index<sizeof...(Fields), Filter>>());
+            }
+            else { // multi
+                cm_.try_emplace(multi_string{std::forward<Fields>(fields)...},
+                                std::make_unique<ordered_compound_multi_index<sizeof...(Fields), Filter>>());
+            }
+        }
+        return true;
+    }
 };
 
 } // namespace nova

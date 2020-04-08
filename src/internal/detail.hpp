@@ -76,10 +76,8 @@ struct is_string_comparable {
 template<class T>
 static constexpr bool is_string_comparable_v = is_string_comparable<T>::value;
 
-template<class T>
-struct always_false {
-    static constexpr bool value = !std::is_same_v<T, T>;
-};
+template<class...>
+struct always_false : std::false_type {};
 
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;

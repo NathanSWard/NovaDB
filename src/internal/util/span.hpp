@@ -57,7 +57,8 @@ public:
     constexpr span(std::array<U, N> const& arr) noexcept
         : ptr_(arr.data()) {}
 
-    template<class U, std::enable_if_t<std::is_lvalue_reference_v<U> && !std::is_same_v<std::decay_t<U>, span>, int> = 0>
+    template<class U, std::enable_if_t<std::is_lvalue_reference_v<U> && std::is_same_v<T, std::decay_t<U>>
+                                       && !std::is_same_v<std::decay_t<U>, span>, int> = 0>
     constexpr span(U&& u) noexcept 
         : storage(1)
         , ptr_(std::addressof(u)) 
@@ -80,15 +81,15 @@ public:
     }
 };
 
-template<class T, std::size_t N, std::size_t... I>
+template<std::size_t N, class T, std::size_t... I>
 constexpr std::array<T, N> _span_to_array_impl(span<T> const s, std::index_sequence<I...>) {
     return {{s[I]...}};
 }
 
-template<class T, std::size_t N>
-constexpr auto span_to_array(span<T> const s) {
+template<std::size_t N, class T>
+constexpr std::array<T, N> span_to_array(span<T> const s) {
     DEBUG_ASSERT(s.size() == N);
-    return _span_to_array_impl(s, std::make_index_sequence<N>{});
+    return _span_to_array_impl<N>(s, std::make_index_sequence<N>{});
 }
 
 } // namespave nova
