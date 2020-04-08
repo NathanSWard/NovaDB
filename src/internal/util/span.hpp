@@ -12,17 +12,39 @@ namespace nova {
 inline static constexpr size_t dynamic_extent = -1;
 
 namespace detail {
-    template<std::size_t N>
-    struct span_size_storage {
-        static constexpr std::size_t size_ = N;
-    };
 
-    template<>
-    struct span_size_storage<dynamic_extent> {
-        constexpr span_size_storage(std::size_t const size) noexcept : size_(size) {}
-        std::size_t const size_;
-    };
-}
+template<std::size_t N>
+struct span_size_storage {
+    static constexpr std::size_t size_ = N;
+};
+
+template<>
+struct span_size_storage<dynamic_extent> {
+    constexpr span_size_storage(std::size_t const size) noexcept : size_(size) {}
+    std::size_t const size_;
+};
+
+template <class R, class T>
+struct is_span_convertible_range
+    : std::bool_constant<std::is_convertible_v<std::remove_pointer_t<decltype(std::data(std::declval<R&>()))> (*)[], T (*)[]>> {};
+
+template<class R, class T>
+inline static constexpr bool is_span_convertible_range_v = is_span_convertible_range<R, T>::value;
+
+template<class T>
+struct is_container_like  {
+    template<class U>
+    static auto test(int) -> decltype(std::declval<U>().size(), std::declval<U>().data(), std::true_type{});
+    template<class>
+    static std::false_type test(...);
+
+    static constexpr bool value = decltype(test<T>(0))::value;
+};
+
+template<class T>
+inline static constexpr bool is_container_like_v = is_container_like<T>::value;
+
+} // namespace detail
 
 template<class T, size_t N = dynamic_extent>
 class span : private detail::span_size_storage<N> {
@@ -43,7 +65,7 @@ public:
         , ptr_(std::addressof(*it))
     {}
 
-    template<class R, std::enable_if_t<detail::is_container_like_v<R> && N == dynamic_extent, int> = 0>
+    template<class R, std::enable_if_t<detail::is_container_like_v<R> && detail::is_span_convertible_range_v<R, T>, int> = 0>
     constexpr span(R&& r) noexcept 
         : storage(r.size())
         , ptr_(r.data()) 
@@ -90,6 +112,17 @@ template<std::size_t N, class T>
 constexpr std::array<T, N> span_to_array(span<T> const s) {
     DEBUG_ASSERT(s.size() == N);
     return _span_to_array_impl<N>(s, std::make_index_sequence<N>{});
+}
+
+template<std::size_t N, class T, std::size_t... I>
+constexpr std::array<T, N> _span_to_array_deref_impl(span<T> const s, std::index_sequence<I...>) {
+    return {{(*s[I])...}};
+}
+
+template<std::size_t N, class T>
+constexpr std::array<T, N> span_to_array_deref(span<T> const s) {
+    DEBUG_ASSERT(s.size() == N);
+    return _span_to_array_deref_impl<N>(s, std::make_index_sequence<N>{});
 }
 
 } // namespave nova

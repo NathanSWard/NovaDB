@@ -17,7 +17,7 @@ namespace nova {
 class collection;
 
 class collection_iterator {
-    decltype(std::declval<std::vector<document*>>().begin()) it_;
+    decltype(std::declval<std::vector<non_null_ptr<document>>>().begin()) it_;
     using iter_type = decltype(it_);
 public:
     using value_type = document;
@@ -34,7 +34,7 @@ public:
 };
 
 class collection_const_iterator {
-    decltype(std::declval<std::vector<document*>>().cbegin()) it_;
+    decltype(std::declval<std::vector<non_null_ptr<document>>>().cbegin()) it_;
     using iter_type = decltype(it_);
 public:
     using value_type = document;
@@ -51,7 +51,7 @@ public:
 };
 
 class query_result {
-    std::vector<document*> docs_{};
+    std::vector<non_null_ptr<document>> docs_{};
     friend class collection;
 public:
     [[nodiscard]] collection_iterator begin() noexcept { return docs_.begin(); }
@@ -61,8 +61,8 @@ public:
 };
 
 class collection {
-    std::vector<document*> docs_{};
-    std::unordered_map<bson, document*> id_index_{};
+    std::vector<non_null_ptr<document>> docs_{};
+    std::unordered_map<bson, non_null_ptr<document>> id_index_{};
     index_manager index_manager_;
 
 public:

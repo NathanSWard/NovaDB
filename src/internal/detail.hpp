@@ -7,6 +7,14 @@
 
 namespace nova::detail {
 
+template<class It, class Sentinel, class Pred>
+constexpr bool all_of(It it, Sentinel const sent, Pred pred) {
+    for (; it != sent; ++it)
+        if (!pred(*it))
+            return false;
+    return true;
+}
+
 template<class T>
 struct is_iterator_like  {
     template<class U>
@@ -19,19 +27,6 @@ struct is_iterator_like  {
 
 template<class T>
 inline static constexpr bool is_iterator_like_v = is_iterator_like<T>::value;
-
-template<class T>
-struct is_container_like  {
-    template<class U>
-    static auto test(int) -> decltype(std::declval<U>().size(), std::declval<U>().data(), std::true_type{});
-    template<class>
-    static std::false_type test(...);
-
-    static constexpr bool value = decltype(test<T>(0))::value;
-};
-
-template<class T>
-inline static constexpr bool is_container_like_v = is_container_like<T>::value;
 
 template<typename It, typename T, typename Cmp = std::less<>>
 constexpr auto lower_bound(It first, It const last, T const& val, Cmp cmp = {}) {

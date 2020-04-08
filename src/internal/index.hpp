@@ -132,6 +132,7 @@ struct single_field_multi_index_interface : public _single_field_index_interface
 
 struct _compound_index_interface : public _base_index_interface {
     virtual index_insert_result insert(span<bson const>, document* const) = 0;
+    virtual index_insert_result insert(span<non_null_ptr<bson const>>, document* const) = 0;
     [[nodiscard]] virtual lookup_result<span<bson const>, document> lookup_one(span<bson const>) = 0;
     [[nodiscard]] virtual lookup_result<span<bson const>, document const> lookup_one(span<bson const>) const = 0;
     [[nodiscard]] virtual cursor lookup_if(function_ref<bool(span<bson const>)>) = 0;
@@ -383,6 +384,15 @@ public:
         return index_insert_result::filter_failed;
     }
 
+    index_insert_result insert(span<non_null_ptr<bson const>> vals, document* const doc) final {
+        DEBUG_ASSERT(vals.size() == N);
+        if (this->filter(vals)) {
+            auto const result = map_.try_emplace(span_to_array_deref<N>(vals), doc);
+            return result.second ? index_insert_result::success : index_insert_result::already_exists;
+        }
+        return index_insert_result::filter_failed;
+    }
+
     [[nodiscard]] lookup_result<span<bson const>, document> lookup_one(span<bson const> const s) final {
         if (auto const found = map_.find(s); found != map_.end())
             return {found->first, *(found->second)};
@@ -468,6 +478,15 @@ public:
         DEBUG_ASSERT(vals.size() == N);
         if (this->filter(vals)) {
             map_.emplace(span_to_array<N>(vals), doc);
+            return index_insert_result::success;
+        }
+        return index_insert_result::filter_failed;
+    }
+
+    index_insert_result insert(span<non_null_ptr<bson const>> vals, document* const doc) final {
+        DEBUG_ASSERT(vals.size() == N);
+        if (this->filter(vals)) {
+            map_.emplace(span_to_array_deref<N>(vals), doc);
             return index_insert_result::success;
         }
         return index_insert_result::filter_failed;

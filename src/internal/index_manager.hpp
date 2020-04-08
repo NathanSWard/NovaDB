@@ -4,7 +4,9 @@
 #include "detail.hpp"
 #include "index.hpp"
 #include "util/multi_string.hpp"
+#include "util/non_null_ptr.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <unordered_map>
 #include <string>
@@ -134,6 +136,40 @@ public:
                 return opt_t{};
             }
         }
+    }
+
+    void register_document(document& doc) {
+        auto register_single_field = [&doc](auto&& index_map) {
+            for (auto&& [field, index] : index_map)
+                if (auto const found = doc.values().get(field); found)
+                    index->insert(found.value(), std::addressof(doc));
+        };
+
+        auto register_compound = [&doc](auto&& index_map) {
+            for (auto&& [fields, index] : index_map) {
+                if (detail::all_of(fields.begin(), fields.end(), [&doc](auto&& field) { return doc.values().contains(std::string{field}); })) { // REMOVE STRING WITH ABSEIL
+                    std::vector<non_null_ptr<bson const>> vals;
+                    vals.reserve(index->field_count());
+                    for (auto&& field : fields)
+                        vals.push_back(std::addressof(doc.values().get(std::string{field}).value())); // REMOVE STRING WITH ABSEIL
+                    index->insert(vals, std::addressof(doc));
+                }
+            }
+        };
+
+        register_single_field(sfu_);
+        register_single_field(sfm_);
+        register_compound(cu_);
+        register_compound(cm_);
+    }
+
+    void register_document(non_null_ptr<document> const doc) {
+        register_document(*doc);
+    }
+
+    template<class It>
+    void register_documents(It first, It const last) {
+        std::for_each(first, last, [this](auto&& doc){ register_document(doc); });
     }
 
     /*
