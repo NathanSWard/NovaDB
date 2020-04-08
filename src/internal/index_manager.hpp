@@ -13,8 +13,7 @@
 
 namespace nova {
 
-template<class Index>
-using single_field_index_map = std::unordered_map<std::string, std::unique_ptr<Index>>;
+namespace detail {
 
 struct compound_index_map_compare {
     using is_transparent = void;
@@ -40,8 +39,33 @@ struct compound_index_map_compare {
     }
 };
 
+template<class Base, class Derived, class... Args>
+class lazy_allocation {
+    std::tuple<Args...> args_;
+public:
+    template<class... Args2>
+    lazy_allocation(Args2&&... args)
+        : args_(std::forward<Args2>(args)...)
+    {}
+
+    operator std::unique_ptr<Base>() const {
+        return std::apply([](auto&&... args){
+            return std::make_unique<Derived>(std::forward<decltype(args)>(args)...);
+        }, 
+        args_);
+    }
+};
+
+template<class B, class D, class... Args>
+lazy_allocation(Args...) -> lazy_allocation<B, D, Args...>;
+
+} // namespace detail
+
 template<class Index>
-using compound_index_map = std::map<multi_string, std::unique_ptr<Index>, compound_index_map_compare>;
+using single_field_index_map = std::unordered_map<std::string, std::unique_ptr<Index>>;
+
+template<class Index>
+using compound_index_map = std::map<multi_string, std::unique_ptr<Index>, detail::compound_index_map_compare>;
 
 enum class index_type : std::uint8_t {
     single_field_unique,
@@ -50,52 +74,94 @@ enum class index_type : std::uint8_t {
     compound_multi,
 };
 
-enum class create_index_result : std::uint8_t {
-    success,
-    already_exists,
-    invalid_args,
-};
-
-struct create_index_args {
-    bool unique = true;
-    std::size_t field_count = 1;
-};
-
 class index_manager {
     single_field_index_map<single_field_unique_index_interface> sfu_;
     single_field_index_map<single_field_multi_index_interface> sfm_;
     compound_index_map<compound_unique_index_interface> cu_;
     compound_index_map<compound_multi_index_interface> cm_;
 public:
-    template<class Filter = no_filter, class... Fields>
-    bool create_index(bool const unique, Fields&&... fields) {
-        static_assert(std::conjunction_v<std::is_constructible<std::string, Fields>...>);
+    template<bool Unique, class Filter = no_filter, class... Fields, 
+             std::enable_if_t<std::conjunction_v<std::is_constructible<std::string, Fields>...>, int> = 0>
+    decltype(auto) create_index(Fields&&... fields) {
 
         if constexpr (sizeof...(Fields) == 0) {
-            static_assert(detail::always_false<Filter>::value);
+            static_assert(detail::always_false<Filter>::value, "index must reference at least 1 document field");
         }
         else if constexpr (sizeof...(Fields) == 1) { // single field index
-            if (unique) {
-                sfu_.try_emplace(std::forward<Fields>(fields)...,
-                                 std::make_unique<ordered_single_field_unqiue_index<Filter>>());
+            if constexpr (Unique) {
+                using base_t = single_field_unique_index_interface;
+                using derived_t = ordered_single_field_unique_index<Filter>;
+                using opt_t = optional<derived_t&>;
+
+                if (auto const found = sfm_.find(fields...); found == sfm_.end()) {
+                    if (auto const [it, b] = sfu_.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
+                            return opt_t{*static_cast<derived_t*>(it->second.get())};
+                }
+                return opt_t{};
             }
             else { // multi
-                sfm_.try_emplace(std::forward<Fields>(fields)...,
-                                 std::make_unique<ordered_single_field_multi_index<Filter>>());
+                using base_t = single_field_multi_index_interface;
+                using derived_t = ordered_single_field_multi_index<Filter>;
+                using opt_t = optional<derived_t&>;
+
+                if (auto const found = sfu_.find(fields...); found == sfu_.end()) {
+                    if (auto const [it, b] = sfm_.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
+                        return opt_t{*static_cast<derived_t*>(it->second.get())};
+                }
+                return opt_t{};
             }
         } 
         else { // compound index
-            if (unique) {
-                cu_.try_emplace(multi_string{std::forward<Fields>(fields)...},
-                                std::make_unique<ordered_compound_unique_index<sizeof...(Fields), Filter>>());
+            if constexpr (Unique) {
+                using base_t = compound_unique_index_interface;
+                using derived_t = ordered_compound_unique_index<sizeof...(Fields), Filter>;
+                using opt_t = optional<derived_t&>;
+
+                if (auto const found = cm_.find(fields...); found == cm_.end()) {
+                    if (auto const [it, b] = cu_.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
+                        return opt_t{*static_cast<derived_t*>(it->second.get())};
+                }
+                return opt_t{};
             }
             else { // multi
-                cm_.try_emplace(multi_string{std::forward<Fields>(fields)...},
-                                std::make_unique<ordered_compound_multi_index<sizeof...(Fields), Filter>>());
+                using base_t = compound_multi_index_interface;
+                using derived_t = ordered_compound_multi_index<sizeof...(Fields), Filter>;
+                using opt_t = optional<derived_t&>;
+
+                if (auto const found = cu_.find(fields...); found == cu_.end()) {
+                    if (auto const [it, b] = cm_.try_emplace(std::forward<Fields>(fields)..., lazy_allocation<base_t, derived_t>{}); b)
+                        return opt_t{*static_cast<derived_t*>(it->second.get())};
+                }
+                return opt_t{};
             }
         }
-        return true;
     }
+
+    /*
+    // CHAGE TO STRING_VIEW WHEN USING ABSEIL CONTAINERS!
+    void insert_value(std::string const& field, bson const& val, document* const doc) {
+        if (auto const found = sfu_.find(field); found != sfu_.end())
+            found->second->insert(val, doc);
+        if (auto const found = sfm_.find(field); found != sfm_.end())
+            found->second->insert(val, doc);
+    }
+
+    template<class... Fields, class... Vals>
+    void insert_values(multi_string&& fields, span<bson const> const vals, document* const doc) {
+        if (auto [first, last] = cu_.equal_range(fields); first != cu_.end()) {
+            while (first != last) {
+                first->second->insert(vals, doc);
+                ++first;
+            }
+        }
+        if (auto [first, last] = cm_.equal_range(fields); first != cm_.end()) {
+            while (first != last) {
+                first->second->insert(vals, doc);
+                ++first;
+            }
+        }
+    }
+    */
 };
 
 } // namespace nova

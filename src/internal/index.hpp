@@ -544,8 +544,8 @@ public:
 
 namespace std {
     template<std::size_t N>
-    struct hash<std::array<nova::bson, N>> {
-        [[nodiscard]] constexpr std::size_t operator()(std::array<nova::bson, N> const& arr) const noexcept {
+    struct hash<std::array<nova::bson const, N>> {
+        [[nodiscard]] constexpr std::size_t operator()(std::array<nova::bson const, N> const& arr) const noexcept {
             std::size_t hash{};
             for (auto&& val : arr)
                 hash += std::hash<nova::bson>{}(val);
@@ -557,7 +557,7 @@ namespace std {
 namespace nova {
 
 template<class Filter = no_filter>
-using ordered_single_field_unqiue_index = basic_single_field_unique_index<std::map, Filter>;
+using ordered_single_field_unique_index = basic_single_field_unique_index<std::map, Filter>;
 template<class Filter = no_filter>
 using ordered_single_field_multi_index = basic_single_field_multi_index<std::multimap, Filter>;
 template<std::size_t N, class Filter = no_filter>
