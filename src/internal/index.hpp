@@ -15,10 +15,80 @@
 
 namespace nova {
 
+namespace detail {
+
 struct no_filter {
     template<class T>
     constexpr bool operator()(T&&) const noexcept { return true; }
 };
+
+template<class T>
+struct compound_index_key_cmp {
+    using is_transparent = void;
+
+    template<std::size_t N>
+    constexpr bool operator()(std::array<T, N> const& a, std::array<T, N> const& b) const noexcept {
+        return a < b;
+    }
+
+    template<std::size_t N>
+    constexpr bool operator()(std::array<T, N> const& a, T const& b) const noexcept {
+        return std::get<0>(a) < b;
+    }
+
+    template<std::size_t N>
+    constexpr bool operator()(T const& b, std::array<T, N> const& a) const noexcept {
+        return b < std::get<0>(a);
+    }
+
+    template<std::size_t N, std::size_t M, std::enable_if_t<(N != M), int> = 0>
+    constexpr bool operator()(std::array<T, N> const& a, std::array<T, M> const& b) const noexcept {
+        constexpr auto min = std::min(N, M);
+        for (std::size_t i = 0; i < min; ++i) {
+            if (a[i] == b[i])
+                continue;
+            return a[i] < b[i];
+        }
+        return false;
+    }
+
+    template<std::size_t N>
+    constexpr bool operator()(std::array<T, N> const& a, span<T> const s) const noexcept {
+        auto const min = std::min(N, s.size());
+        for (std::size_t i = 0; i < min; ++i) {
+            if (a[i] == s[i])
+                continue;
+            return a[i] < s[i];
+        }
+        return false;
+    }
+
+    template<std::size_t N>
+    constexpr bool operator()(span<T> const s, std::array<T, N> const& a) const noexcept {
+        auto const min = std::min(N, s.size());
+        for (std::size_t i = 0; i < min; ++i) {
+            if (s[i] == a[i])
+                continue;
+            return s[i] < a[i];
+        }
+        return false;
+    }
+};
+
+template<class Filter>
+struct filter_wrapper : public Filter {
+    template<class... Args, std::enable_if_t<std::is_constructible_v<Filter, Args...>, int> = 0>
+    constexpr filter_wrapper(Args&&... args)
+        : Filter(std::forward<Args>(args)...)
+    {}
+
+    template<class T>
+    constexpr bool filter(T&& t) const noexcept {
+        return static_cast<Filter const&>(*this)(std::forward<T>(t));
+    }
+};
+
+} // namespace detail
 
 enum class index_insert_result : std::uint8_t {
     success,
@@ -26,6 +96,9 @@ enum class index_insert_result : std::uint8_t {
     filter_failed,
 };
 
+//
+// index base classes:
+//
 struct _base_index_interface {
     [[nodiscard]] virtual bool empty() const noexcept = 0;
     [[nodiscard]] virtual std::size_t size() const noexcept = 0;
@@ -80,28 +153,18 @@ struct compound_multi_index_interface : public _compound_index_interface {
     virtual ~compound_multi_index_interface() = default;
 };
 
-template<class Filter>
-struct filter_wrapper : Filter {
-    template<class... Args, std::enable_if_t<std::is_constructible_v<Filter, Args...>, int> = 0>
-    constexpr filter_wrapper(Args&&... args)
-        : Filter(std::forward<Args>(args)...)
-    {}
-
-    template<class T>
-    constexpr bool filter(T&& t) const noexcept {
-        return static_cast<Filter const&>(*this)(std::forward<T>(t));
-    }
-};
-
+//
+// index concrete class implementations:
+//
 template<template<class...> class MapT, class Filter>
-class basic_single_field_unique_index final : public single_field_unique_index_interface, private filter_wrapper<Filter> {
+class basic_single_field_unique_index final : public single_field_unique_index_interface, private detail::filter_wrapper<Filter> {
     MapT<bson, document*> map_{};
 public:
     basic_single_field_unique_index() = default;
     
     template<class Fn, std::enable_if_t<!std::is_same_v<std::decay_t<Fn>, basic_single_field_unique_index>, int> = 0>
     basic_single_field_unique_index(Fn&& fn)
-        : filter_wrapper<Filter>(std::forward<Fn>(fn))
+        : detail::filter_wrapper<Filter>(std::forward<Fn>(fn))
     {}
 
     ~basic_single_field_unique_index() = default;
@@ -170,16 +233,20 @@ public:
     }
 
     [[nodiscard]] bool empty() const noexcept final { return map_.empty(); }
+
     [[nodiscard]] std::size_t size() const noexcept  final { return map_.size(); }
+
     [[nodiscard]] constexpr std::size_t field_count() const noexcept final { return 1; }
-    void clear() { map_.clear(); }
+
+    void clear() final { map_.clear(); }
+
     [[nodiscard]] function_ref<bool(bson const&)> value_filter() const noexcept final {
         return static_cast<Filter const&>(*this);
     }
 };
 
 template<template<class...> class MapT, class Filter>
-class basic_single_field_multi_index final : public single_field_multi_index_interface, private filter_wrapper<Filter> {
+class basic_single_field_multi_index final : public single_field_multi_index_interface, private detail::filter_wrapper<Filter> {
     MapT<bson, document*> map_{};
     using map_iter_t = decltype(map_.begin());
     using const_map_iter_t = decltype(map_.cbegin());
@@ -189,7 +256,7 @@ public:
 
     template<class Fn, std::enable_if_t<!std::is_same_v<std::decay_t<Fn>, basic_single_field_multi_index>, int> = 0>
     basic_single_field_multi_index(Fn&& fn)
-        : filter_wrapper<Filter>(std::forward<Fn>(fn))
+        : detail::filter_wrapper<Filter>(std::forward<Fn>(fn))
     {}
 
     index_insert_result insert(bson const& val, document* const doc) final {
@@ -283,69 +350,20 @@ public:
     }
 
     [[nodiscard]] bool empty() const noexcept final { return map_.empty(); }
+
     [[nodiscard]] std::size_t size() const noexcept  final { return map_.size(); }
+
     [[nodiscard]] constexpr std::size_t field_count() const noexcept final { return 1; }
-    void clear() { map_.clear(); }
+
+    void clear() final { map_.clear(); }
+
     [[nodiscard]] function_ref<bool(bson const&)> value_filter() const noexcept final {
         return static_cast<Filter const&>(*this);
     }
 };
 
-template<class T>
-struct index_key_compare {
-    using is_transparent = void;
-
-    template<std::size_t N>
-    constexpr bool operator()(std::array<T, N> const& a, std::array<T, N> const& b) const noexcept {
-        return a < b;
-    }
-
-    template<std::size_t N>
-    constexpr bool operator()(std::array<T, N> const& a, T const& b) const noexcept {
-        return std::get<0>(a) < b;
-    }
-
-    template<std::size_t N>
-    constexpr bool operator()(T const& b, std::array<T, N> const& a) const noexcept {
-        return b < std::get<0>(a);
-    }
-
-    template<std::size_t N, std::size_t M, std::enable_if_t<(N != M), int> = 0>
-    constexpr bool operator()(std::array<T, N> const& a, std::array<T, M> const& b) const noexcept {
-        constexpr auto min = std::min(N, M);
-        for (std::size_t i = 0; i < min; ++i) {
-            if (a[i] == b[i])
-                continue;
-            return a[i] < b[i];
-        }
-        return false;
-    }
-
-    template<std::size_t N>
-    constexpr bool operator()(std::array<T, N> const& a, span<T> const s) const noexcept {
-        auto const min = std::min(N, s.size());
-        for (std::size_t i = 0; i < min; ++i) {
-            if (a[i] == s[i])
-                continue;
-            return a[i] < s[i];
-        }
-        return false;
-    }
-
-    template<std::size_t N>
-    constexpr bool operator()(span<T> const s, std::array<T, N> const& a) const noexcept {
-        auto const min = std::min(N, s.size());
-        for (std::size_t i = 0; i < min; ++i) {
-            if (s[i] == a[i])
-                continue;
-            return s[i] < a[i];
-        }
-        return false;
-    }
-};
-
 template<template<class...> class MapT, std::size_t N, class Func, class Filter>
-class basic_compound_unique_index final : public compound_unique_index_interface, private filter_wrapper<Filter> {
+class basic_compound_unique_index final : public compound_unique_index_interface, private detail::filter_wrapper<Filter> {
     MapT<std::array<bson const, N>, document*, Func> map_;
 public:
     basic_compound_unique_index() = default;
@@ -353,7 +371,7 @@ public:
 
     template<class Fn, std::enable_if_t<!std::is_same_v<std::decay_t<Fn>, basic_compound_unique_index>, int> = 0>
     basic_compound_unique_index(Fn&& fn)
-        : filter_wrapper<Filter>(std::forward<Fn>(fn))
+        : detail::filter_wrapper<Filter>(std::forward<Fn>(fn))
     {}
 
     index_insert_result insert(span<bson const> vals, document* const doc) final {
@@ -420,16 +438,20 @@ public:
     }
 
     [[nodiscard]] bool empty() const noexcept final { return map_.empty(); }
+
     [[nodiscard]] std::size_t size() const noexcept final { return map_.size(); }
+
     [[nodiscard]] std::size_t field_count() const noexcept final { return N; }
+
     void clear() final { map_.clear(); }
+
     [[nodiscard]] function_ref<bool(span<bson const>)> value_filter() const noexcept final {
         return static_cast<Filter const&>(*this);
     }
 };
 
 template<template<class...> class MapT, std::size_t N, class Func, class Filter>
-class basic_compound_multi_index final : public compound_multi_index_interface, private filter_wrapper<Filter> {
+class basic_compound_multi_index final : public compound_multi_index_interface, private detail::filter_wrapper<Filter> {
     MapT<std::array<bson const, N>, document*, Func> map_;
     using map_iter_t = decltype(map_.begin());
     using const_map_iter_t = decltype(map_.cbegin());
@@ -439,7 +461,7 @@ public:
 
     template<class Fn, std::enable_if_t<!std::is_same_v<std::decay_t<Fn>, basic_compound_multi_index>, int> = 0>
     basic_compound_multi_index(Fn&& fn)
-        : filter_wrapper<Filter>(std::forward<Fn>(fn))
+        : detail::filter_wrapper<Filter>(std::forward<Fn>(fn))
     {}
 
     index_insert_result insert(span<bson const> vals, document* const doc) final {
@@ -519,7 +541,6 @@ public:
         return false;
     }
 
-
     std::size_t erase_if(function_ref<bool(span<bson const>)> fn) final {
         std::size_t count = 0;
         for (auto it = map_.begin(); it != map_.end(); ++it) {
@@ -532,9 +553,13 @@ public:
     }
 
     [[nodiscard]] bool empty() const noexcept final { return map_.empty(); }
+
     [[nodiscard]] std::size_t size() const noexcept  final { return map_.size(); }
+
     [[nodiscard]] std::size_t field_count() const noexcept final { return N; }
+
     void clear() final { map_.clear(); }
+
     [[nodiscard]] function_ref<bool(span<bson const>)> value_filter() const noexcept final {
         return static_cast<Filter const&>(*this);
     }
@@ -556,14 +581,17 @@ namespace std {
 
 namespace nova {
 
-template<class Filter = no_filter>
+template<class Filter = detail::no_filter>
 using ordered_single_field_unique_index = basic_single_field_unique_index<std::map, Filter>;
-template<class Filter = no_filter>
+
+template<class Filter = detail::no_filter>
 using ordered_single_field_multi_index = basic_single_field_multi_index<std::multimap, Filter>;
-template<std::size_t N, class Filter = no_filter>
-using ordered_compound_unique_index = basic_compound_unique_index<std::map, N, index_key_compare<bson const>, Filter>;
-template<std::size_t N, class Filter = no_filter>
-using ordered_compound_multi_index = basic_compound_multi_index<std::multimap, N, index_key_compare<bson const>, Filter>;
+
+template<std::size_t N, class Filter = detail::no_filter>
+using ordered_compound_unique_index = basic_compound_unique_index<std::map, N, detail::compound_index_key_cmp<bson const>, Filter>;
+
+template<std::size_t N, class Filter = detail::no_filter>
+using ordered_compound_multi_index = basic_compound_multi_index<std::multimap, N, detail::compound_index_key_cmp<bson const>, Filter>;
 
 } // namespace nova
 

@@ -45,14 +45,13 @@ class lazy_allocation {
 public:
     template<class... Args2>
     lazy_allocation(Args2&&... args)
-        : args_(std::forward<Args2>(args)...)
+        : args_(std::forward_as_tuple(std::forward<Args2>(args)...))
     {}
 
     operator std::unique_ptr<Base>() const {
         return std::apply([](auto&&... args){
             return std::make_unique<Derived>(std::forward<decltype(args)>(args)...);
-        }, 
-        args_);
+        }, args_);
     }
 };
 
@@ -80,7 +79,7 @@ class index_manager {
     compound_index_map<compound_unique_index_interface> cu_;
     compound_index_map<compound_multi_index_interface> cm_;
 public:
-    template<bool Unique, class Filter = no_filter, class... Fields, 
+    template<bool Unique, class Filter = detail::no_filter, class... Fields, 
              std::enable_if_t<std::conjunction_v<std::is_constructible<std::string, Fields>...>, int> = 0>
     decltype(auto) create_index(Fields&&... fields) {
 
@@ -129,7 +128,7 @@ public:
                 using opt_t = optional<derived_t&>;
 
                 if (auto const found = cu_.find(fields...); found == cu_.end()) {
-                    if (auto const [it, b] = cm_.try_emplace(std::forward<Fields>(fields)..., lazy_allocation<base_t, derived_t>{}); b)
+                    if (auto const [it, b] = cm_.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
                         return opt_t{*static_cast<derived_t*>(it->second.get())};
                 }
                 return opt_t{};
