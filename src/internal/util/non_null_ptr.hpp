@@ -7,24 +7,51 @@
 
 namespace nova {
 
-template<class T>
+template <class T>
 class non_null_ptr {
-    T* ptr_;
 public:
-    non_null_ptr(std::nullptr_t) = delete;
-
-    constexpr non_null_ptr(T* ptr) noexcept : ptr_(ptr) {
-        DEBUG_ASSERT(ptr);
+    template<typename U, std::enable_if_t<std::is_convertible_v<U, T*>, int> = 0>
+    constexpr non_null_ptr(U&& u) noexcept
+        : ptr_(std::forward<U>(u))
+    {
+        DEBUG_ASSERT(ptr_ != nullptr);
     }
-    constexpr non_null_ptr(non_null_ptr const&) noexcept = default;
-    constexpr non_null_ptr(non_null_ptr&&) noexcept = default;
 
-    constexpr non_null_ptr& operator=(std::nullptr_t) = delete;
-    constexpr non_null_ptr& operator=(non_null_ptr const&) = default;
-    constexpr non_null_ptr& operator=(non_null_ptr&&) = default;
+    template<typename = std::enable_if_t<!std::is_same_v<std::nullptr_t, T>>>
+    constexpr non_null_ptr(T const u) noexcept
+        : ptr_(u)
+    {
+        DEBUG_ASSERT(ptr_ != nullptr);
+    }
 
-    constexpr operator T*() const noexcept { return ptr_; }
-    constexpr T& operator*() const noexcept { return *ptr_; }
+    template<typename U, std::enable_if_t<std::is_convertible_v<U, T>, int> = 0>
+    constexpr non_null_ptr(non_null_ptr<U> const& other) : non_null_ptr(other.get()) {}
+
+    constexpr non_null_ptr(non_null_ptr const& other) noexcept = default;
+    constexpr non_null_ptr& operator=(non_null_ptr const& other) noexcept = default;
+
+    constexpr auto get() const noexcept {
+        DEBUG_ASSERT(ptr_ != nullptr);
+        return ptr_;
+    }
+
+    constexpr operator T*() const noexcept { return get(); }
+    constexpr auto operator->() const noexcept { return get(); }
+    constexpr decltype(auto) operator*() const noexcept { return *get(); }
+
+    non_null_ptr(std::nullptr_t) = delete;
+    non_null_ptr& operator=(std::nullptr_t) = delete;
+
+    non_null_ptr& operator++() = delete;
+    non_null_ptr& operator--() = delete;
+    non_null_ptr operator++(int) = delete;
+    non_null_ptr operator--(int) = delete;
+    non_null_ptr& operator+=(std::ptrdiff_t) = delete;
+    non_null_ptr& operator-=(std::ptrdiff_t) = delete;
+    void operator[](std::ptrdiff_t) const = delete;
+
+private:
+    T* ptr_;
 };
 
 } // namespace nova
