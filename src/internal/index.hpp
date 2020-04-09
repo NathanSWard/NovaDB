@@ -88,7 +88,47 @@ struct filter_wrapper : public Filter {
     }
 };
 
+struct deref_map_iter_second {
+    template<class It>
+    constexpr decltype(auto) operator()(It&& it) const noexcept {
+        return *(it->second);
+    }
+};
+
+struct sf_cursor_deref {
+    template<class It>
+    constexpr auto operator()(It&& it) const noexcept {
+        return std::pair<bson const&, document&>(it->first, *(it->second));
+    }
+};
+
+struct cmp_cursor_deref {
+    template<class It>
+    constexpr auto operator()(It&& it) const noexcept {
+        return std::pair<span<bson const> const, document&>(it->first, *(it->second));
+    }
+};
+
+struct sf_const_cursor_deref {
+    template<class It>
+    constexpr auto operator()(It&& it) const noexcept {
+        return std::pair<bson const&, document const&>(it->first, *(it->second));
+    }
+};
+
+struct cmp_const_cursor_deref {
+    template<class It>
+    constexpr auto operator()(It&& it) const noexcept {
+        return std::pair<span<bson const> const, document const&>(it->first, *(it->second));
+    }
+};
+
 } // namespace detail
+
+using sf_index_cursor = basic_cursor<std::pair<bson const&, document&>>;
+using cmp_index_cursor = basic_cursor<std::pair<span<bson const> const, document&>>;
+using sf_index_const_cursor = basic_cursor<std::pair<bson const&, document const&>>;
+using cmp_index_const_cursor = basic_cursor<std::pair<span<bson const> const, document const&>>;
 
 enum class index_insert_result : std::uint8_t {
     success,
@@ -108,7 +148,7 @@ struct _base_index_interface {
 };
 
 struct _single_field_index_interface : public _base_index_interface {
-    virtual index_insert_result insert(bson const&, document* const) = 0;
+    virtual index_insert_result insert(bson const&, non_null_ptr<document> const) = 0;
     [[nodiscard]] virtual lookup_result<bson, document> lookup_one(bson const&) = 0;
     [[nodiscard]] virtual lookup_result<bson, document const> lookup_one(bson const&) const = 0;
     [[nodiscard]] virtual cursor lookup_if(function_ref<bool(bson const&)>) = 0;
@@ -116,6 +156,8 @@ struct _single_field_index_interface : public _base_index_interface {
     virtual std::size_t erase(bson const&) = 0;
     virtual std::size_t erase_if(function_ref<bool(bson const&)>) = 0;
     virtual function_ref<bool(bson const&)> value_filter() const noexcept = 0;
+    virtual sf_index_cursor iterate() = 0;
+    virtual sf_index_const_cursor iterate() const = 0;
     virtual ~_single_field_index_interface() = default;
 };
 
@@ -126,13 +168,13 @@ struct single_field_unique_index_interface : public _single_field_index_interfac
 struct single_field_multi_index_interface : public _single_field_index_interface {
     [[nodiscard]] virtual cursor lookup_many(bson const&) = 0;
     [[nodiscard]] virtual const_cursor lookup_many(bson const&) const = 0;
-    virtual bool erase(bson const&, document* const) = 0;
+    virtual bool erase(bson const&, non_null_ptr<document> const) = 0;
     virtual ~single_field_multi_index_interface() = default;
 };
 
 struct _compound_index_interface : public _base_index_interface {
-    virtual index_insert_result insert(span<bson const>, document* const) = 0;
-    virtual index_insert_result insert(span<non_null_ptr<bson const>>, document* const) = 0;
+    virtual index_insert_result insert(span<bson const>, non_null_ptr<document> const) = 0;
+    virtual index_insert_result insert(span<non_null_ptr<bson const>>, non_null_ptr<document> const) = 0;
     [[nodiscard]] virtual lookup_result<span<bson const>, document> lookup_one(span<bson const>) = 0;
     [[nodiscard]] virtual lookup_result<span<bson const>, document const> lookup_one(span<bson const>) const = 0;
     [[nodiscard]] virtual cursor lookup_if(function_ref<bool(span<bson const>)>) = 0;
@@ -140,6 +182,8 @@ struct _compound_index_interface : public _base_index_interface {
     virtual std::size_t erase(span<bson const>) = 0;
     virtual std::size_t erase_if(function_ref<bool(span<bson const>)>) = 0;
     virtual function_ref<bool(span<bson const>)> value_filter() const noexcept = 0;
+    virtual cmp_index_cursor iterate() = 0;
+    virtual cmp_index_const_cursor iterate() const = 0;
     virtual ~_compound_index_interface() = default;
 };
 
@@ -159,7 +203,9 @@ struct compound_multi_index_interface : public _compound_index_interface {
 //
 template<template<class...> class MapT, class Filter>
 class basic_single_field_unique_index final : public single_field_unique_index_interface, private detail::filter_wrapper<Filter> {
-    MapT<bson, document*> map_{};
+    MapT<bson, non_null_ptr<document>> map_{};
+    using map_iter_t = decltype(map_.begin());
+    using const_map_iter_t = decltype(map_.cbegin());
 public:
     basic_single_field_unique_index() = default;
     
@@ -170,7 +216,7 @@ public:
 
     ~basic_single_field_unique_index() = default;
 
-    index_insert_result insert(bson const& val, document* const doc) final {
+    index_insert_result insert(bson const& val, non_null_ptr<document> const doc) final {
         if (this->filter(val)) {
             auto const result = map_.try_emplace(val, doc);
             return result.second ? index_insert_result::success : index_insert_result::already_exists;
@@ -191,7 +237,7 @@ public:
     }
 
     [[nodiscard]] cursor lookup_if(function_ref<bool(bson const&)> fn) final {
-        std::vector<document*> vec;
+        std::vector<non_null_ptr<document>> vec;
         for (auto&& [k, v] : map_) {
             if (fn(k))
                 vec.push_back(k);
@@ -205,7 +251,7 @@ public:
     }
 
     [[nodiscard]] const_cursor lookup_if(function_ref<bool(bson const&)>) const final {
-        std::vector<document const*> vec;
+        std::vector<non_null_ptr<document const>> vec;
         for (auto&& [k, v] : map_) {
             if (fn(k))
                 vec.push_back(k);
@@ -244,11 +290,21 @@ public:
     [[nodiscard]] function_ref<bool(bson const&)> value_filter() const noexcept final {
         return static_cast<Filter const&>(*this);
     }
+
+    [[nodiscard]] sf_index_cursor iterate() final {
+        return multiple_index_lookup_iter<typename sf_index_cursor::value_type, 
+            detail::sf_cursor_deref, map_iter_t>{map_.begin(), map_.end()};
+    }
+
+    [[nodiscard]] sf_index_const_cursor iterate() const final {
+        return multiple_index_lookup_iter<typename sf_index_const_cursor::value_type, 
+            detail::sf_const_cursor_deref, const_map_iter_t>{map_.cbegin(), map_.cend()};
+    }
 };
 
 template<template<class...> class MapT, class Filter>
 class basic_single_field_multi_index final : public single_field_multi_index_interface, private detail::filter_wrapper<Filter> {
-    MapT<bson, document*> map_{};
+    MapT<bson, non_null_ptr<document>> map_{};
     using map_iter_t = decltype(map_.begin());
     using const_map_iter_t = decltype(map_.cbegin());
 public:
@@ -260,7 +316,7 @@ public:
         : detail::filter_wrapper<Filter>(std::forward<Fn>(fn))
     {}
 
-    index_insert_result insert(bson const& val, document* const doc) final {
+    index_insert_result insert(bson const& val, non_null_ptr<document> const doc) final {
         if (this->filter(val)) {
             map_.emplace(val, doc);
             return index_insert_result::success;
@@ -282,18 +338,18 @@ public:
 
     [[nodiscard]] cursor lookup_many(bson const& val) final {
         if (auto const [first, last] = map_.equal_range(val); first != map_.end())
-            return multiple_index_lookup_iter<document, map_iter_t>{first, last};
+            return multiple_index_lookup_iter<document&, detail::deref_map_iter_second, map_iter_t>{first, last};
         return zero_index_lookup<document>;
     }
 
     [[nodiscard]] const_cursor lookup_many(bson const& val) const final {
         if (auto const [first, last] = map_.equal_range(val); first != map_.end())
-            return multiple_index_lookup_iter<document const, const_map_iter_t>{first, last};
+            return multiple_index_lookup_iter<document const&, detail::deref_map_iter_second, const_map_iter_t>{first, last};
         return zero_index_lookup<document const>;
     }
 
     [[nodiscard]] cursor lookup_if(function_ref<bool(bson const&)> fn) final {
-        std::vector<document*> vec;
+        std::vector<non_null_ptr<document>> vec;
         for (auto&& [k, v] : map_) {
             if (fn(k))
                 vec.push_back(v);
@@ -308,7 +364,7 @@ public:
     }
 
     [[nodiscard]] const_cursor lookup_if(function_ref<bool(bson const&)> fn) const final {
-        std::vector<document const*> vec;
+        std::vector<non_null_ptr<document const>> vec;
         for (auto&& [k, v] : map_) {
             if (fn(k))
                 vec.push_back(v);
@@ -326,7 +382,7 @@ public:
         return map_.erase(val);
     }
 
-    bool erase(bson const& val, document* const doc) final {
+    bool erase(bson const& val, non_null_ptr<document> const doc) final {
         if (auto [first, last] = map_.equal_range(val); first != map_.end()) {
             while (first != last) {
                 if (first->second == doc) {
@@ -361,11 +417,23 @@ public:
     [[nodiscard]] function_ref<bool(bson const&)> value_filter() const noexcept final {
         return static_cast<Filter const&>(*this);
     }
+
+    [[nodiscard]] sf_index_cursor iterate() final {
+        return multiple_index_lookup_iter<typename sf_index_cursor::value_type, 
+            detail::sf_cursor_deref, map_iter_t>{map_.begin(), map_.end()};
+    }
+
+    [[nodiscard]] sf_index_const_cursor iterate() const final {
+        return multiple_index_lookup_iter<typename sf_index_const_cursor::value_type, 
+            detail::sf_const_cursor_deref, const_map_iter_t>{map_.cbegin(), map_.cend()};
+    }
 };
 
 template<template<class...> class MapT, std::size_t N, class Func, class Filter>
 class basic_compound_unique_index final : public compound_unique_index_interface, private detail::filter_wrapper<Filter> {
-    MapT<std::array<bson const, N>, document*, Func> map_;
+    MapT<std::array<bson const, N>, non_null_ptr<document>, Func> map_;
+    using map_iter_t = decltype(map_.begin());
+    using const_map_iter_t = decltype(map_.cbegin());
 public:
     basic_compound_unique_index() = default;
     ~basic_compound_unique_index() = default;
@@ -375,7 +443,7 @@ public:
         : detail::filter_wrapper<Filter>(std::forward<Fn>(fn))
     {}
 
-    index_insert_result insert(span<bson const> vals, document* const doc) final {
+    index_insert_result insert(span<bson const> vals, non_null_ptr<document> const doc) final {
         DEBUG_ASSERT(vals.size() == N);
         if (this->filter(vals)) {
             auto const result = map_.try_emplace(span_to_array<N>(vals), doc);
@@ -384,7 +452,7 @@ public:
         return index_insert_result::filter_failed;
     }
 
-    index_insert_result insert(span<non_null_ptr<bson const>> vals, document* const doc) final {
+    index_insert_result insert(span<non_null_ptr<bson const>> vals, non_null_ptr<document> const doc) final {
         DEBUG_ASSERT(vals.size() == N);
         if (this->filter(vals)) {
             auto const result = map_.try_emplace(span_to_array_deref<N>(vals), doc);
@@ -406,7 +474,7 @@ public:
     }
 
     [[nodiscard]] cursor lookup_if(function_ref<bool(span<bson const>)> fn) final {
-        std::vector<document*> docs;
+        std::vector<non_null_ptr<document>> docs;
         for (auto&& [k, v] : map_) 
             if (fn(k))
                 docs.push_back(v);
@@ -419,7 +487,7 @@ public:
     }
 
     [[nodiscard]] const_cursor lookup_if(function_ref<bool(span<bson const>)> fn) const final {
-        std::vector<document const*> docs;
+        std::vector<non_null_ptr<document const>> docs;
         for (auto&& [k, v] : map_) 
             if (fn(k))
                 docs.push_back(v);
@@ -458,11 +526,21 @@ public:
     [[nodiscard]] function_ref<bool(span<bson const>)> value_filter() const noexcept final {
         return static_cast<Filter const&>(*this);
     }
+
+    [[nodiscard]] cmp_index_cursor iterate() final {
+        return multiple_index_lookup_iter<typename cmp_index_cursor::value_type, 
+            detail::cmp_cursor_deref, map_iter_t>{map_.begin(), map_.end()};
+    }
+
+    [[nodiscard]] cmp_index_const_cursor iterate() const final {
+        return multiple_index_lookup_iter<typename cmp_index_const_cursor::value_type, 
+            detail::cmp_const_cursor_deref, const_map_iter_t>{map_.cbegin(), map_.cend()};
+    }
 };
 
 template<template<class...> class MapT, std::size_t N, class Func, class Filter>
 class basic_compound_multi_index final : public compound_multi_index_interface, private detail::filter_wrapper<Filter> {
-    MapT<std::array<bson const, N>, document*, Func> map_;
+    MapT<std::array<bson const, N>, non_null_ptr<document>, Func> map_;
     using map_iter_t = decltype(map_.begin());
     using const_map_iter_t = decltype(map_.cbegin());
 public: 
@@ -474,7 +552,7 @@ public:
         : detail::filter_wrapper<Filter>(std::forward<Fn>(fn))
     {}
 
-    index_insert_result insert(span<bson const> vals, document* const doc) final {
+    index_insert_result insert(span<bson const> vals, non_null_ptr<document> const doc) final {
         DEBUG_ASSERT(vals.size() == N);
         if (this->filter(vals)) {
             map_.emplace(span_to_array<N>(vals), doc);
@@ -483,7 +561,7 @@ public:
         return index_insert_result::filter_failed;
     }
 
-    index_insert_result insert(span<non_null_ptr<bson const>> vals, document* const doc) final {
+    index_insert_result insert(span<non_null_ptr<bson const>> vals, non_null_ptr<document> const doc) final {
         DEBUG_ASSERT(vals.size() == N);
         if (this->filter(vals)) {
             map_.emplace(span_to_array_deref<N>(vals), doc);
@@ -506,18 +584,18 @@ public:
 
     [[nodiscard]] cursor lookup_many(span<bson const> const vals) final {
         if (auto const [first, last] = map_.equal_range(vals); first != map_.end())
-            return multiple_index_lookup_iter<document, map_iter_t>{first, last};
+            return multiple_index_lookup_iter<document&, detail::deref_map_iter_second, map_iter_t>{first, last};
         return zero_index_lookup<document>;
     }
 
     [[nodiscard]] const_cursor lookup_many(span<bson const> const vals) const final {
         if (auto const [first, last] = map_.equal_range(vals); first != map_.end())
-            return multiple_index_lookup_iter<document const, const_map_iter_t>{first, last};
+            return multiple_index_lookup_iter<document const&, detail::deref_map_iter_second, const_map_iter_t>{first, last};
         return zero_index_lookup<document const>;
     }
 
     [[nodiscard]] cursor lookup_if(function_ref<bool(span<bson const>)> fn) final {
-        std::vector<document*> docs;
+        std::vector<non_null_ptr<document>> docs;
         for (auto&& [k, v] : map_) 
             if (fn(k))
                 docs.push_back(v);
@@ -530,7 +608,7 @@ public:
     }
 
     [[nodiscard]] const_cursor lookup_if(function_ref<bool(span<bson const>)> fn) const final {
-        std::vector<document const*> docs;
+        std::vector<non_null_ptr<document const>> docs;
         for (auto&& [k, v] : map_) 
             if (fn(k))
                 docs.push_back(v);
@@ -547,7 +625,7 @@ public:
         return map_.erase(span_to_array<N>(s)); // return array<bson*> ????
     }
 
-    bool erase(span<bson const> vals, document* const doc) final {
+    bool erase(span<bson const> vals, non_null_ptr<document> const doc) final {
         if (auto [first, last] = map_.equal_range(vals); first != map_.end()) {
             while (first != last) {
                 if (first->second == doc) {
@@ -581,6 +659,16 @@ public:
 
     [[nodiscard]] function_ref<bool(span<bson const>)> value_filter() const noexcept final {
         return static_cast<Filter const&>(*this);
+    }
+
+    [[nodiscard]] cmp_index_cursor iterate() final {
+        return multiple_index_lookup_iter<typename cmp_index_cursor::value_type, 
+            detail::cmp_cursor_deref, map_iter_t>{map_.begin(), map_.end()};
+    }
+
+    [[nodiscard]] cmp_index_const_cursor iterate() const final {
+        return multiple_index_lookup_iter<typename cmp_index_const_cursor::value_type, 
+            detail::cmp_const_cursor_deref, const_map_iter_t>{map_.cbegin(), map_.cend()};
     }
 };
 
