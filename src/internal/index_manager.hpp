@@ -1,6 +1,9 @@
 #ifndef NOVA_INDEX_MANAGER_HPP
 #define NOVA_INDEX_MANAGER_HPP
 
+#include <absl/container/btree_map.h>
+#include <absl/container/flat_hash_map.h>
+
 #include "detail.hpp"
 #include "index.hpp"
 #include "util/multi_string.hpp"
@@ -8,7 +11,6 @@
 
 #include <algorithm>
 #include <memory>
-#include <unordered_map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -63,10 +65,10 @@ lazy_allocation(Args...) -> lazy_allocation<B, D, Args...>;
 } // namespace detail
 
 template<class Index>
-using single_field_index_map = std::unordered_map<std::string, std::unique_ptr<Index>>;
+using single_field_index_map = absl::flat_hash_map<std::string, std::unique_ptr<Index>>;
 
 template<class Index>
-using compound_index_map = std::map<multi_string, std::unique_ptr<Index>, detail::compound_index_map_compare>;
+using compound_index_map = absl::btree_map<multi_string, std::unique_ptr<Index>, detail::compound_index_map_compare>;
 
 enum class index_type : std::uint8_t {
     single_field_unique,
@@ -141,17 +143,17 @@ public:
     void register_document(document& doc) {
         auto register_single_field = [&doc](auto&& index_map) {
             for (auto&& [field, index] : index_map)
-                if (auto const found = doc.values().get(field); found)
+                if (auto const found = doc.values().lookup(field); found)
                     index->insert(found.value(), std::addressof(doc));
         };
 
         auto register_compound = [&doc](auto&& index_map) {
             for (auto&& [fields, index] : index_map) {
-                if (detail::all_of(fields.begin(), fields.end(), [&doc](auto&& field) { return doc.values().contains(std::string{field}); })) { // REMOVE STRING WITH ABSEIL
+                if (detail::all_of(fields.begin(), fields.end(), [&doc](auto&& field) { return doc.values().contains(field); })) {
                     std::vector<non_null_ptr<bson const>> vals;
                     vals.reserve(index->field_count());
                     for (auto&& field : fields)
-                        vals.push_back(std::addressof(doc.values().get(std::string{field}).value())); // REMOVE STRING WITH ABSEIL
+                        vals.push_back(std::addressof(doc.values().lookup(field).value()));
                     index->insert(vals, std::addressof(doc));
                 }
             }
@@ -171,32 +173,6 @@ public:
     void register_documents(It first, It const last) {
         std::for_each(first, last, [this](auto&& doc){ register_document(doc); });
     }
-
-    /*
-    // CHAGE TO STRING_VIEW WHEN USING ABSEIL CONTAINERS!
-    void insert_value(std::string const& field, bson const& val, document* const doc) {
-        if (auto const found = sfu_.find(field); found != sfu_.end())
-            found->second->insert(val, doc);
-        if (auto const found = sfm_.find(field); found != sfm_.end())
-            found->second->insert(val, doc);
-    }
-
-    template<class... Fields, class... Vals>
-    void insert_values(multi_string&& fields, span<bson const> const vals, document* const doc) {
-        if (auto [first, last] = cu_.equal_range(fields); first != cu_.end()) {
-            while (first != last) {
-                first->second->insert(vals, doc);
-                ++first;
-            }
-        }
-        if (auto [first, last] = cm_.equal_range(fields); first != cm_.end()) {
-            while (first != last) {
-                first->second->insert(vals, doc);
-                ++first;
-            }
-        }
-    }
-    */
 };
 
 } // namespace nova

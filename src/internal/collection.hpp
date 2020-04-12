@@ -1,6 +1,8 @@
 #ifndef NOVA_COLLECTION_HPP
 #define NOVA_COLLECTION_HPP
 
+#include <absl/container/flat_hash_map.h>
+
 #include "bson.hpp"
 #include "../debug.hpp"
 #include "document.hpp"
@@ -10,7 +12,7 @@
 #include "util/non_null_ptr.hpp"
 
 #include <tuple>
-#include <unordered_map>
+
 
 namespace nova {
 
@@ -62,7 +64,7 @@ public:
 
 class collection {
     std::vector<non_null_ptr<document>> docs_{};
-    std::unordered_map<bson, non_null_ptr<document>> id_index_{};
+    absl::flat_hash_map<bson, non_null_ptr<document>> id_index_{}; // btree to enforce sorting?
     index_manager index_manager_;
 
 public:
@@ -99,7 +101,8 @@ public:
 
     template<class ID>
     optional<document&> insert(ID&& id) {
-        auto const [it, inserted] = id_index_.try_emplace(id, nullptr);
+        static constexpr document* _fake_document_pointer = nullptr; 
+        auto const [it, inserted] = id_index_.try_emplace(id, _fake_document_pointer);
         if (inserted) {
             // TODO INSERT INTO APPROPRIATE INDICES
             auto const& doc = docs_.emplace_back(new document(std::forward<ID>(id)));

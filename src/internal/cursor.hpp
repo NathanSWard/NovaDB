@@ -10,7 +10,7 @@
 namespace nova {
 
 namespace {
-    inline static constexpr std::size_t largest_gen_size = sizeof(std::vector<non_null_ptr<document>>);
+    inline static constexpr std::size_t largest_gen_size = 32UL; // TODO: check all possible size, don't hard code in size
 }
 
 template<class T>

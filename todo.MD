@@ -1,0 +1,16 @@
+# TODOs
+- bson.hpp
+  - migrate to `absl::variant` or `boost::variant2`
+- index.hpp
+  - add overload to compound_index's lookup taking `span<non_null_ptr<bson const>>`
+- index_manager.hpp
+  - add lookup functionality
+  - check compoun_index's insertion policy if all field *must* be present?
+- cursor.hpp
+  - add compile time value getting largest possible cursor size
+- collection.hpp
+  - change document vector to use `std::unique_ptr<document>`
+  - refactor insertion API
+    - take entire documents
+    - take functors?
+- TESTS!!!

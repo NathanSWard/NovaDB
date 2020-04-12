@@ -1,15 +1,16 @@
 #ifndef NOVA_INDEX_HPP
 #define NOVA_INDEX_HPP
 
+#include <absl/container/btree_map.h>
+#include <absl/container/node_hash_map.h>
+
 #include "cursor.hpp"
 #include "document.hpp"
 #include "util/function_ref.hpp"
 #include "util/inplace_function.hpp"
 #include "util/span.hpp"
 
-#include <map>
 #include <numeric>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -52,8 +53,30 @@ struct compound_index_key_cmp {
         return false;
     }
 
-    template<std::size_t N>
-    constexpr bool operator()(std::array<T, N> const& a, span<T> const s) const noexcept {
+    template<std::size_t N, std::size_t M>
+    constexpr bool operator()(std::array<T, N> const& a, std::array<non_null_ptr<T>, M> const& b) const noexcept {
+        constexpr auto min = std::min(N, M);
+        for (std::size_t i = 0; i < min; ++i) {
+            if (a[i] == *b[i])
+                continue;
+            return a[i] < *b[i];
+        }
+        return false;
+    }
+
+    template<std::size_t N, std::size_t M>
+    constexpr bool operator()(std::array<non_null_ptr<T>, N> const& a, std::array<T, N> const& b) const noexcept {
+        constexpr auto min = std::min(N, M);
+        for (std::size_t i = 0; i < min; ++i) {
+            if (*a[i] == b[i])
+                continue;
+            return *a[i] < b[i];
+        }
+        return false;
+    }
+
+    template<std::size_t N, std::size_t M>
+    constexpr bool operator()(std::array<T, N> const& a, span<T, M> const s) const noexcept {
         auto const min = std::min(N, s.size());
         for (std::size_t i = 0; i < min; ++i) {
             if (a[i] == s[i])
@@ -63,8 +86,8 @@ struct compound_index_key_cmp {
         return false;
     }
 
-    template<std::size_t N>
-    constexpr bool operator()(span<T> const s, std::array<T, N> const& a) const noexcept {
+    template<std::size_t N, std::size_t M>
+    constexpr bool operator()(span<T, M> const s, std::array<T, N> const& a) const noexcept {
         auto const min = std::min(N, s.size());
         for (std::size_t i = 0; i < min; ++i) {
             if (s[i] == a[i])
@@ -125,6 +148,11 @@ struct cmp_const_cursor_deref {
 
 } // namespace detail
 
+namespace {
+    inline static constexpr auto max_iter_size = std::max(sizeof(typename absl::btree_map<std::array<int, 10>, std::string>::iterator) 
+                                                          , sizeof(typename absl::btree_multimap<int, int>::iterator));
+}
+
 using sf_index_cursor = basic_cursor<std::pair<bson const&, document&>>;
 using cmp_index_cursor = basic_cursor<std::pair<span<bson const> const, document&>>;
 using sf_index_const_cursor = basic_cursor<std::pair<bson const&, document const&>>;
@@ -155,9 +183,9 @@ struct _single_field_index_interface : public _base_index_interface {
     [[nodiscard]] virtual const_cursor lookup_if(function_ref<bool(bson const&)>) const = 0;
     virtual std::size_t erase(bson const&) = 0;
     virtual std::size_t erase_if(function_ref<bool(bson const&)>) = 0;
-    virtual function_ref<bool(bson const&)> value_filter() const noexcept = 0;
-    virtual sf_index_cursor iterate() = 0;
-    virtual sf_index_const_cursor iterate() const = 0;
+    [[nodiscard]] virtual function_ref<bool(bson const&)> value_filter() const noexcept = 0;
+    [[nodiscard]] virtual sf_index_cursor iterate() = 0;
+    [[nodiscard]] virtual sf_index_const_cursor iterate() const = 0;
     virtual ~_single_field_index_interface() = default;
 };
 
@@ -180,10 +208,11 @@ struct _compound_index_interface : public _base_index_interface {
     [[nodiscard]] virtual cursor lookup_if(function_ref<bool(span<bson const>)>) = 0;
     [[nodiscard]] virtual const_cursor lookup_if(function_ref<bool(span<bson const>)>) const = 0;
     virtual std::size_t erase(span<bson const>) = 0;
+    virtual std::size_t erase(span<non_null_ptr<bson const>> const) = 0;
     virtual std::size_t erase_if(function_ref<bool(span<bson const>)>) = 0;
-    virtual function_ref<bool(span<bson const>)> value_filter() const noexcept = 0;
-    virtual cmp_index_cursor iterate() = 0;
-    virtual cmp_index_const_cursor iterate() const = 0;
+    [[nodiscard]] virtual function_ref<bool(span<bson const>)> value_filter() const noexcept = 0;
+    [[nodiscard]] virtual cmp_index_cursor iterate() = 0;
+    [[nodiscard]] virtual cmp_index_const_cursor iterate() const = 0;
     virtual ~_compound_index_interface() = default;
 };
 
@@ -194,7 +223,8 @@ struct compound_unique_index_interface : public _compound_index_interface {
 struct compound_multi_index_interface : public _compound_index_interface {
     [[nodiscard]] virtual cursor lookup_many(span<bson const>) = 0;
     [[nodiscard]] virtual const_cursor lookup_many(span<bson const>) const = 0;
-    virtual bool erase(span<bson const>, document * const) = 0;
+    virtual bool erase(span<non_null_ptr<bson const>> const, non_null_ptr<document const> const) = 0;
+    virtual bool erase(span<bson const>, non_null_ptr<document const> const) = 0;
     virtual ~compound_multi_index_interface() = default;
 };
 
@@ -504,6 +534,11 @@ public:
         return map_.erase(span_to_array<N>(s));
     }
 
+    std::size_t erase(span<non_null_ptr<bson const>> const s) final {
+        DEBUG_ASSERT(s.size() == N);
+        return map_.erase(span_to_array<N>(s));
+    }
+
     std::size_t erase_if(function_ref<bool(span<bson const>)> fn) final {
         std::size_t count = 0;
         for (auto it = map_.begin(); it != map_.end(); ++it) {
@@ -625,7 +660,25 @@ public:
         return map_.erase(span_to_array<N>(s)); // return array<bson*> ????
     }
 
+    std::size_t erase(span<non_null_ptr<bson const>> const s) final {
+        DEBUG_ASSERT(s.size() == N);
+        return map_.erase(span_to_array<N>(s));
+    }
+
     bool erase(span<bson const> vals, non_null_ptr<document> const doc) final {
+        if (auto [first, last] = map_.equal_range(vals); first != map_.end()) {
+            while (first != last) {
+                if (first->second == doc) {
+                    map_.erase(first);
+                    return true;
+                }
+                ++first;
+            }
+        }
+        return false;
+    }
+
+    bool erase(span<non_null_ptr<bson const>> const vals, non_null_ptr<document> const doc) final {
         if (auto [first, last] = map_.equal_range(vals); first != map_.end()) {
             while (first != last) {
                 if (first->second == doc) {
@@ -689,16 +742,16 @@ namespace std {
 namespace nova {
 
 template<class Filter = detail::no_filter>
-using ordered_single_field_unique_index = basic_single_field_unique_index<std::map, Filter>;
+using ordered_single_field_unique_index = basic_single_field_unique_index<absl::btree_map, Filter>;
 
 template<class Filter = detail::no_filter>
-using ordered_single_field_multi_index = basic_single_field_multi_index<std::multimap, Filter>;
+using ordered_single_field_multi_index = basic_single_field_multi_index<absl::btree_multimap, Filter>;
 
 template<std::size_t N, class Filter = detail::no_filter>
-using ordered_compound_unique_index = basic_compound_unique_index<std::map, N, detail::compound_index_key_cmp<bson const>, Filter>;
+using ordered_compound_unique_index = basic_compound_unique_index<absl::btree_map, N, detail::compound_index_key_cmp<bson const>, Filter>;
 
 template<std::size_t N, class Filter = detail::no_filter>
-using ordered_compound_multi_index = basic_compound_multi_index<std::multimap, N, detail::compound_index_key_cmp<bson const>, Filter>;
+using ordered_compound_multi_index = basic_compound_multi_index<absl::btree_multimap, N, detail::compound_index_key_cmp<bson const>, Filter>;
 
 } // namespace nova
 

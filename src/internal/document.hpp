@@ -1,7 +1,9 @@
 #ifndef NOVA_DOCUMENT_HPP
 #define NOVA_DOCUMENT_HPP
 
+#include <absl/container/flat_hash_map.h>
 #include <fmt/format.h>
+
 #include "bson.hpp"
 #include "util/err_result.hpp"
 #include "util/map_results.hpp"
@@ -9,7 +11,6 @@
 #include <cstring>
 #include <string>
 #include <type_traits>
-#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -24,12 +25,12 @@ using doc_id = bson;
 class doc_values {
     using key_t = std::string;
     using value_t = bson;
-    std::unordered_map<key_t, value_t> values_;
+    absl::flat_hash_map<key_t, value_t> values_;
 
 public:
-    template<class K>
-    [[nodiscard]] bool contains(K const& k) const {
-        return values_.find(k) != values_.end();
+    template<class Key>
+    [[nodiscard]] bool contains(Key const& key) const {
+        return values_.contains(key);
     }
 
     template<class Key, class... Args>
@@ -57,14 +58,14 @@ public:
     }
 
     template<class Key>
-    [[nodiscard]] lookup_result<key_t, value_t> get(Key const& key) {
+    [[nodiscard]] lookup_result<key_t, value_t> lookup(Key const& key) {
         if (auto const iter = values_.find(key); iter != values_.end())
             return {iter->first, iter->second};
         return {};
     }
 
     template<class Key>
-    [[nodiscard]] lookup_result<key_t, value_t const> get(Key const& key) const {
+    [[nodiscard]] lookup_result<key_t, value_t const> lookup(Key const& key) const {
         if (auto const iter = values_.find(key); iter != values_.end())
             return {iter->first, iter->second};
         return {};
@@ -72,16 +73,16 @@ public:
 
     template<class Key>
     [[nodiscard]] auto operator[](Key const& key) {
-        return get(key);
+        return lookup(key);
     }
 
     template<class Key>
     [[nodiscard]] auto operator[](Key const& key) const {
-        return get(key);
+        return lookup(key);
     }
 
     template<class T, class Key>
-    [[nodiscard]] err_result<T&, value_error> get_as(Key const& key) {
+    [[nodiscard]] err_result<T&, value_error> lookup_as(Key const& key) {
         if (auto const iter = values_.find(key); iter != values_.end()) {
             if (auto opt = iter->second.template as<T>(); opt)
                 return {*opt};
@@ -91,7 +92,7 @@ public:
     }
 
     template<class T, class Key>
-    [[nodiscard]] err_result<T const&, value_error> get_as(Key const& key) const {
+    [[nodiscard]] err_result<T const&, value_error> lookup_as(Key const& key) const {
         if (auto const iter = values_.find(key); iter != values_.end()) {
             if (auto const opt = iter->second.template as<T>(); opt)
                 return {*opt};
