@@ -80,7 +80,7 @@ public:
         return std::string_view{reinterpret_cast<char**>(storage_)[pos], size};
     }
 
-    std::size_t size() const noexcept { return size_; }
+    constexpr std::size_t size() const noexcept { return size_; }
 
     struct sentinel{};
 
@@ -89,11 +89,20 @@ public:
         std::size_t pos_{0};
     public:
         constexpr iterator(multi_string const& ref) noexcept : ref_(std::addressof(ref)) {}
-        auto operator*() { return ref_->operator[](pos_); }
+        auto operator*() const noexcept { return ref_->operator[](pos_); }
         constexpr iterator& operator++() noexcept { ++pos_; return *this; }
 
-        bool operator!=(sentinel const) const noexcept {
-            return pos_ < ref_->size();
+        bool operator==(iterator const& other) const noexcept {
+            return ref_ == other.ref_ && pos_ == other.pos_;
+        }
+        bool operator!=(iterator const& other) const noexcept {
+            return !(*this == other);
+        }
+        bool operator==(sentinel const) const noexcept {
+            return pos_ >= ref_->size();
+        }
+        bool operator!=(sentinel const s) const noexcept {
+            return !(*this == s);
         }
     };
 
