@@ -3,6 +3,7 @@
 
 #include "../../debug.hpp"
 #include "../detail.hpp"
+#include "non_null_ptr.hpp"
 
 #include <cstdint>
 #include <type_traits>
@@ -65,7 +66,8 @@ public:
         , ptr_(std::addressof(*it))
     {}
 
-    template<class R, std::enable_if_t<detail::is_container_like_v<R> && detail::is_span_convertible_range_v<R, T>, int> = 0>
+    template<class R, std::enable_if_t<std::conjunction_v<detail::meta_not<std::is_same_v<std::decay_t<R>, span>>, 
+        detail::is_container_like<R>, detail::is_span_convertible_range<R, T>>, int> = 0>
     constexpr span(R&& r) noexcept 
         : storage(r.size())
         , ptr_(r.data()) 
@@ -103,26 +105,26 @@ public:
     }
 };
 
-template<std::size_t N, class T, std::size_t... I>
-constexpr std::array<T, N> _span_to_array_impl(span<T> const s, std::index_sequence<I...>) {
+template<class T, std::size_t N, class U, std::size_t... I>
+constexpr std::array<T, N> _span_to_array_impl(span<U> const s, std::index_sequence<I...>) {
     return {{s[I]...}};
 }
 
-template<std::size_t N, class T>
-constexpr std::array<T, N> span_to_array(span<T> const s) {
+template<class T, std::size_t N, class U>
+constexpr std::array<T, N> span_to_array(span<U> const s) {
     DEBUG_ASSERT(s.size() == N);
-    return _span_to_array_impl<N>(s, std::make_index_sequence<N>{});
+    return _span_to_array_impl<T, N>(s, std::make_index_sequence<N>{});
 }
 
-template<std::size_t N, class T, std::size_t... I>
-constexpr std::array<T, N> _span_to_array_deref_impl(span<T> const s, std::index_sequence<I...>) {
-    return {{(*s[I])...}};
+template<class T, std::size_t N, class U, std::size_t... I>
+constexpr std::array<T, N> _span_to_array_deref_impl(span<non_null_ptr<U>> const s, std::index_sequence<I...>) {
+    return {{(*(s[I]))...}};
 }
 
-template<std::size_t N, class T>
-constexpr std::array<T, N> span_to_array_deref(span<T> const s) {
+template<class T, std::size_t N, class U>
+constexpr std::array<T, N> span_to_array_deref(span<non_null_ptr<U>> const s) {
     DEBUG_ASSERT(s.size() == N);
-    return _span_to_array_deref_impl<N>(s, std::make_index_sequence<N>{});
+    return _span_to_array_deref_impl<T, N>(s, std::make_index_sequence<N>{});
 }
 
 } // namespave nova

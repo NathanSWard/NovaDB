@@ -7,6 +7,23 @@
 
 namespace nova::detail {
 
+template<bool B>
+struct meta_not {
+    static constexpr bool value = !B;
+};
+
+template<bool B>
+inline static constexpr bool meta_not_v = meta_not<B>::value;
+
+template<class Iterator1, class Sentinel1, class Iterator2>
+constexpr bool equal(Iterator1 it1, Sentinel1 const sent1, Iterator2 it2) {
+    for (; it1 != sent1; ++it1, ++it2) {
+        if (!(*it1 == *it2))
+            return false;
+    }
+    return true;
+}
+
 template<class It, class Sentinel, class Pred>
 constexpr bool all_of(It it, Sentinel const sent, Pred pred) {
     for (; it != sent; ++it)

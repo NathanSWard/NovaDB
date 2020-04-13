@@ -23,26 +23,25 @@ struct no_filter {
     constexpr bool operator()(T&&) const noexcept { return true; }
 };
 
-template<class T>
 struct compound_index_key_cmp {
     using is_transparent = void;
 
-    template<std::size_t N>
+    template<class T, std::size_t N>
     constexpr bool operator()(std::array<T, N> const& a, std::array<T, N> const& b) const noexcept {
         return a < b;
     }
 
-    template<std::size_t N>
+    template<class T, std::size_t N>
     constexpr bool operator()(std::array<T, N> const& a, T const& b) const noexcept {
         return std::get<0>(a) < b;
     }
 
-    template<std::size_t N>
+    template<class T, std::size_t N>
     constexpr bool operator()(T const& b, std::array<T, N> const& a) const noexcept {
         return b < std::get<0>(a);
     }
 
-    template<std::size_t N, std::size_t M, std::enable_if_t<(N != M), int> = 0>
+    template<class T, std::size_t N, std::size_t M>
     constexpr bool operator()(std::array<T, N> const& a, std::array<T, M> const& b) const noexcept {
         constexpr auto min = std::min(N, M);
         for (std::size_t i = 0; i < min; ++i) {
@@ -53,8 +52,19 @@ struct compound_index_key_cmp {
         return false;
     }
 
-    template<std::size_t N, std::size_t M>
-    constexpr bool operator()(std::array<T, N> const& a, std::array<non_null_ptr<T>, M> const& b) const noexcept {
+    template<class T, std::size_t N, class U, std::size_t M>
+    constexpr bool operator()(std::array<T, N> const& a, std::array<U, M> const& b) const noexcept {
+        constexpr auto min = std::min(N, M);
+        for (std::size_t i = 0; i < min; ++i) {
+            if (a[i] == b[i])
+                continue;
+            return a[i] < b[i];
+        }
+        return false;
+    }
+
+    template<class T, std::size_t N, class U, std::size_t M>
+    constexpr bool operator()(std::array<T, N> const& a, std::array<non_null_ptr<U>, M> const& b) const noexcept {
         constexpr auto min = std::min(N, M);
         for (std::size_t i = 0; i < min; ++i) {
             if (a[i] == *b[i])
@@ -64,8 +74,8 @@ struct compound_index_key_cmp {
         return false;
     }
 
-    template<std::size_t N, std::size_t M>
-    constexpr bool operator()(std::array<non_null_ptr<T>, N> const& a, std::array<T, N> const& b) const noexcept {
+    template<class U, std::size_t N, class T, std::size_t M>
+    constexpr bool operator()(std::array<non_null_ptr<U>, N> const& a, std::array<T, M> const& b) const noexcept {
         constexpr auto min = std::min(N, M);
         for (std::size_t i = 0; i < min; ++i) {
             if (*a[i] == b[i])
@@ -75,8 +85,8 @@ struct compound_index_key_cmp {
         return false;
     }
 
-    template<std::size_t N, std::size_t M>
-    constexpr bool operator()(std::array<T, N> const& a, span<T, M> const s) const noexcept {
+    template<class T, std::size_t N, class U, std::size_t M>
+    constexpr bool operator()(std::array<T, N> const& a, span<U, M> const s) const noexcept {
         auto const min = std::min(N, s.size());
         for (std::size_t i = 0; i < min; ++i) {
             if (a[i] == s[i])
@@ -86,13 +96,35 @@ struct compound_index_key_cmp {
         return false;
     }
 
-    template<std::size_t N, std::size_t M>
-    constexpr bool operator()(span<T, M> const s, std::array<T, N> const& a) const noexcept {
+    template<class U, std::size_t N, class T, std::size_t M>
+    constexpr bool operator()(span<U, M> const s, std::array<T, N> const& a) const noexcept {
         auto const min = std::min(N, s.size());
         for (std::size_t i = 0; i < min; ++i) {
             if (s[i] == a[i])
                 continue;
             return s[i] < a[i];
+        }
+        return false;
+    }
+
+    template<class T, std::size_t N, class U, std::size_t M>
+    constexpr bool operator()(std::array<T, N> const& a, span<non_null_ptr<U>, M> const s) const noexcept {
+        auto const min = std::min(N, s.size());
+        for (std::size_t i = 0; i < min; ++i) {
+            if (a[i] == *s[i])
+                continue;
+            return a[i] < *s[i];
+        }
+        return false;
+    }
+
+    template<class U, std::size_t N, class T, std::size_t M>
+    constexpr bool operator()(span<non_null_ptr<U>, M> const s, std::array<T, N> const& a) const noexcept {
+        auto const min = std::min(N, s.size());
+        for (std::size_t i = 0; i < min; ++i) {
+            if (*s[i] == a[i])
+                continue;
+            return *s[i] < a[i];
         }
         return false;
     }
@@ -106,8 +138,8 @@ struct filter_wrapper : public Filter {
     {}
 
     template<class T>
-    constexpr bool filter(T&& t) const noexcept {
-        return static_cast<Filter const&>(*this)(std::forward<T>(t));
+    constexpr bool filter(T const& t) const noexcept {
+        return static_cast<Filter const&>(*this)(t);
     }
 };
 
@@ -270,7 +302,7 @@ public:
         std::vector<non_null_ptr<document>> vec;
         for (auto&& [k, v] : map_) {
             if (fn(k))
-                vec.push_back(k);
+                vec.push_back(v);
         }
         if (vec.empty())
             return zero_index_lookup<document>;
@@ -280,11 +312,11 @@ public:
             return multiple_index_lookup_vec{std::move(vec)};
     }
 
-    [[nodiscard]] const_cursor lookup_if(function_ref<bool(bson const&)>) const final {
+    [[nodiscard]] const_cursor lookup_if(function_ref<bool(bson const&)> fn) const final {
         std::vector<non_null_ptr<document const>> vec;
         for (auto&& [k, v] : map_) {
             if (fn(k))
-                vec.push_back(k);
+                vec.push_back(v);
         }
         if (vec.empty())
             return zero_index_lookup<document const>;
@@ -348,7 +380,7 @@ public:
 
     index_insert_result insert(bson const& val, non_null_ptr<document> const doc) final {
         if (this->filter(val)) {
-            map_.emplace(val, doc);
+            map_.emplace(std::make_pair(val, doc));
             return index_insert_result::success;
         }
         return index_insert_result::filter_failed;
@@ -461,7 +493,7 @@ public:
 
 template<template<class...> class MapT, std::size_t N, class Func, class Filter>
 class basic_compound_unique_index final : public compound_unique_index_interface, private detail::filter_wrapper<Filter> {
-    MapT<std::array<bson const, N>, non_null_ptr<document>, Func> map_;
+    MapT<std::array<bson, N>, non_null_ptr<document>, Func> map_;
     using map_iter_t = decltype(map_.begin());
     using const_map_iter_t = decltype(map_.cbegin());
 public:
@@ -476,7 +508,7 @@ public:
     index_insert_result insert(span<bson const> vals, non_null_ptr<document> const doc) final {
         DEBUG_ASSERT(vals.size() == N);
         if (this->filter(vals)) {
-            auto const result = map_.try_emplace(span_to_array<N>(vals), doc);
+            auto const result = map_.try_emplace(span_to_array<bson, N>(vals), doc);
             return result.second ? index_insert_result::success : index_insert_result::already_exists;
         }
         return index_insert_result::filter_failed;
@@ -485,7 +517,7 @@ public:
     index_insert_result insert(span<non_null_ptr<bson const>> vals, non_null_ptr<document> const doc) final {
         DEBUG_ASSERT(vals.size() == N);
         if (this->filter(vals)) {
-            auto const result = map_.try_emplace(span_to_array_deref<N>(vals), doc);
+            auto const result = map_.try_emplace(span_to_array_deref<bson, N>(vals), doc);
             return result.second ? index_insert_result::success : index_insert_result::already_exists;
         }
         return index_insert_result::filter_failed;
@@ -531,12 +563,12 @@ public:
 
     std::size_t erase(span<bson const> s) final {
         DEBUG_ASSERT(s.size() == N);
-        return map_.erase(span_to_array<N>(s));
+        return map_.erase(span_to_array<bson, N>(s));
     }
 
     std::size_t erase(span<non_null_ptr<bson const>> const s) final {
         DEBUG_ASSERT(s.size() == N);
-        return map_.erase(span_to_array<N>(s));
+        return map_.erase(span_to_array_deref<bson, N>(s));
     }
 
     std::size_t erase_if(function_ref<bool(span<bson const>)> fn) final {
@@ -575,7 +607,7 @@ public:
 
 template<template<class...> class MapT, std::size_t N, class Func, class Filter>
 class basic_compound_multi_index final : public compound_multi_index_interface, private detail::filter_wrapper<Filter> {
-    MapT<std::array<bson const, N>, non_null_ptr<document>, Func> map_;
+    MapT<std::array<bson, N>, non_null_ptr<document>, Func> map_;
     using map_iter_t = decltype(map_.begin());
     using const_map_iter_t = decltype(map_.cbegin());
 public: 
@@ -590,7 +622,7 @@ public:
     index_insert_result insert(span<bson const> vals, non_null_ptr<document> const doc) final {
         DEBUG_ASSERT(vals.size() == N);
         if (this->filter(vals)) {
-            map_.emplace(span_to_array<N>(vals), doc);
+            map_.emplace(std::make_pair(span_to_array<bson, N>(vals), doc));
             return index_insert_result::success;
         }
         return index_insert_result::filter_failed;
@@ -599,7 +631,7 @@ public:
     index_insert_result insert(span<non_null_ptr<bson const>> vals, non_null_ptr<document> const doc) final {
         DEBUG_ASSERT(vals.size() == N);
         if (this->filter(vals)) {
-            map_.emplace(span_to_array_deref<N>(vals), doc);
+            map_.emplace(std::make_pair(span_to_array_deref<bson, N>(vals), doc));
             return index_insert_result::success;
         }
         return index_insert_result::filter_failed;
@@ -657,15 +689,15 @@ public:
 
     std::size_t erase(span<bson const> s) final { // todo maybe take span<bson*> to avoid copy
         DEBUG_ASSERT(s.size() == N);
-        return map_.erase(span_to_array<N>(s)); // return array<bson*> ????
+        return map_.erase(span_to_array<bson, N>(s)); // return array<bson*> ????
     }
 
     std::size_t erase(span<non_null_ptr<bson const>> const s) final {
         DEBUG_ASSERT(s.size() == N);
-        return map_.erase(span_to_array<N>(s));
+        return map_.erase(span_to_array_deref<bson, N>(s));
     }
 
-    bool erase(span<bson const> vals, non_null_ptr<document> const doc) final {
+    bool erase(span<bson const> const vals, non_null_ptr<document const> const doc) final {
         if (auto [first, last] = map_.equal_range(vals); first != map_.end()) {
             while (first != last) {
                 if (first->second == doc) {
@@ -678,7 +710,7 @@ public:
         return false;
     }
 
-    bool erase(span<non_null_ptr<bson const>> const vals, non_null_ptr<document> const doc) final {
+    bool erase(span<non_null_ptr<bson const>> const vals, non_null_ptr<document const> const doc) final {
         if (auto [first, last] = map_.equal_range(vals); first != map_.end()) {
             while (first != last) {
                 if (first->second == doc) {
@@ -729,8 +761,8 @@ public:
 
 namespace std {
     template<std::size_t N>
-    struct hash<std::array<nova::bson const, N>> {
-        [[nodiscard]] constexpr std::size_t operator()(std::array<nova::bson const, N> const& arr) const noexcept {
+    struct hash<std::array<nova::bson, N>> {
+        [[nodiscard]] constexpr std::size_t operator()(std::array<nova::bson, N> const& arr) const noexcept {
             std::size_t hash{};
             for (auto&& val : arr)
                 hash += std::hash<nova::bson>{}(val);
@@ -748,10 +780,10 @@ template<class Filter = detail::no_filter>
 using ordered_single_field_multi_index = basic_single_field_multi_index<absl::btree_multimap, Filter>;
 
 template<std::size_t N, class Filter = detail::no_filter>
-using ordered_compound_unique_index = basic_compound_unique_index<absl::btree_map, N, detail::compound_index_key_cmp<bson const>, Filter>;
+using ordered_compound_unique_index = basic_compound_unique_index<absl::btree_map, N, detail::compound_index_key_cmp, Filter>;
 
 template<std::size_t N, class Filter = detail::no_filter>
-using ordered_compound_multi_index = basic_compound_multi_index<absl::btree_multimap, N, detail::compound_index_key_cmp<bson const>, Filter>;
+using ordered_compound_multi_index = basic_compound_multi_index<absl::btree_multimap, N, detail::compound_index_key_cmp, Filter>;
 
 } // namespace nova
 

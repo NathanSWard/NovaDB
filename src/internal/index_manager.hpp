@@ -68,7 +68,7 @@ template<class Index>
 using single_field_index_map = absl::flat_hash_map<std::string, std::unique_ptr<Index>>;
 
 template<class Index>
-using compound_index_map = absl::btree_map<multi_string, std::unique_ptr<Index>, detail::compound_index_map_compare>;
+using compound_index_map = absl::btree_multimap<multi_string, std::unique_ptr<Index>, detail::compound_index_map_compare>;
 
 enum class index_type : std::uint8_t {
     single_field_unique,
@@ -78,11 +78,15 @@ enum class index_type : std::uint8_t {
 };
 
 class index_manager {
-    single_field_index_map<single_field_unique_index_interface> sfu_;
-    single_field_index_map<single_field_multi_index_interface> sfm_;
-    compound_index_map<compound_unique_index_interface> cu_;
-    compound_index_map<compound_multi_index_interface> cm_;
+    single_field_index_map<single_field_unique_index_interface> sfu_{};
+    single_field_index_map<single_field_multi_index_interface> sfm_{};
+    compound_index_map<compound_unique_index_interface> cu_{};
+    compound_index_map<compound_multi_index_interface> cm_{};
 public:
+    index_manager() = default;
+    index_manager(index_manager&&) = default;
+    index_manager& operator=(index_manager&&) = default;
+
     template<bool Unique, class Filter = detail::no_filter, class... Fields, 
              std::enable_if_t<std::conjunction_v<std::is_constructible<std::string, Fields>...>, int> = 0>
     decltype(auto) create_index(Fields&&... fields) {
@@ -96,7 +100,7 @@ public:
                 using derived_t = ordered_single_field_unique_index<Filter>;
                 using opt_t = optional<derived_t&>;
 
-                if (auto const found = sfm_.find(fields...); found == sfm_.end()) {
+                if (!sfm_.contains(fields...)) {
                     if (auto const [it, b] = sfu_.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
                             return opt_t{*static_cast<derived_t*>(it->second.get())};
                 }
@@ -107,7 +111,7 @@ public:
                 using derived_t = ordered_single_field_multi_index<Filter>;
                 using opt_t = optional<derived_t&>;
 
-                if (auto const found = sfu_.find(fields...); found == sfu_.end()) {
+                if (!sfu_.contains(fields...)) {
                     if (auto const [it, b] = sfm_.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
                         return opt_t{*static_cast<derived_t*>(it->second.get())};
                 }
@@ -115,14 +119,19 @@ public:
             }
         } 
         else { // compound index
+            multi_string fields_string(string_args, std::forward<Fields>(fields)...);
             if constexpr (Unique) {
                 using base_t = compound_unique_index_interface;
                 using derived_t = ordered_compound_unique_index<sizeof...(Fields), Filter>;
                 using opt_t = optional<derived_t&>;
 
-                if (auto const found = cm_.find(fields...); found == cm_.end()) {
-                    if (auto const [it, b] = cu_.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
-                        return opt_t{*static_cast<derived_t*>(it->second.get())};
+                if (auto const [first, last] = cm_.equal_range(fields_string)
+                    ; first == cm_.end() || std::none_of(first, last, [&fields_string](auto&& p){ return p.first == fields_string; })) {
+                    auto const it = cu_.emplace(
+                        std::piecewise_construct,
+                        std::forward_as_tuple(std::move(fields_string)),
+                        std::forward_as_tuple(std::unique_ptr<base_t>((base_t*) new derived_t())));
+                    return opt_t{*reinterpret_cast<derived_t*>(it->second.get())};
                 }
                 return opt_t{};
             }
@@ -131,9 +140,13 @@ public:
                 using derived_t = ordered_compound_multi_index<sizeof...(Fields), Filter>;
                 using opt_t = optional<derived_t&>;
 
-                if (auto const found = cu_.find(fields...); found == cu_.end()) {
-                    if (auto const [it, b] = cm_.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
-                        return opt_t{*static_cast<derived_t*>(it->second.get())};
+                if (auto const [first, last] = cu_.equal_range(fields_string)
+                    ; first == cu_.end() || std::none_of(first, last, [&fields_string](auto&& p){ return p.first == fields_string; })) {
+                    auto const it = cm_.emplace(
+                        std::piecewise_construct,
+                        std::forward_as_tuple(std::move(fields_string)),
+                        std::forward_as_tuple(std::unique_ptr<base_t>((base_t*) new derived_t())));
+                    return opt_t{*reinterpret_cast<derived_t*>(it->second.get())};
                 }
                 return opt_t{};
             }

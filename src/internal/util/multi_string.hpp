@@ -1,20 +1,29 @@
 #ifndef NOVA_MULTI_STRING_HPP
 #define NOVA_MULTI_STRING_HPP
 
+#include "../detail.hpp"
 #include "../../debug.hpp"
 
 #include <string_view>
 #include <vector>
 
+namespace nova {
+
+struct string_args_t {};
+inline static constexpr string_args_t string_args{};
+
 class multi_string {
     char* storage_ = nullptr;
-    std::size_t size_;
+    std::size_t size_ = 0;
 public:
-    template<class... Views, std::enable_if_t<std::conjunction_v<std::is_constructible<std::string_view, Views>...>, int> = 0>
-    multi_string(Views&&... views)
+    constexpr multi_string() noexcept = default;
+
+    template<class... Views>
+    explicit multi_string(string_args_t, Views&&... views)
         : size_(sizeof...(Views))
     {
-        constexpr auto size_of_positions = (sizeof...(Views) + 1) * sizeof(char const*); 
+        static_assert(std::conjunction_v<std::is_constructible<std::string_view, Views>...>);
+        constexpr auto size_of_positions = (sizeof...(Views) + 1) * sizeof(char**); 
         storage_ = new char[(std::string_view{views}.size() + ...) + size_of_positions];
 
         char** pos = reinterpret_cast<char**>(storage_);
@@ -31,6 +40,25 @@ public:
         *pos = string;
     }
 
+    multi_string(multi_string const& other)
+        : size_(other.size_)
+    {
+        auto const size_of_positions = sizeof(char**) * (size_ + 1);
+        auto const size_of_chars = reinterpret_cast<char**>(other.storage_)[size_] - reinterpret_cast<char**>(other.storage_)[0];
+
+        storage_ = new char[size_of_positions + size_of_chars];
+
+        char const** pos = reinterpret_cast<char const**>(storage_);
+        char const* str = reinterpret_cast<char const*>(reinterpret_cast<char**>(storage_) + size_of_positions);
+        char const* const* other_start = reinterpret_cast<char const* const*>(other.storage_);
+        char const* const* other_end = reinterpret_cast<char const* const*>(other.storage_) + 1;
+        for (std::size_t i = 0; i < size_ + 1; ++i, ++pos, ++other_start, ++other_end) {
+            *pos = str;
+            str += (*other_end - *other_start);
+        }
+        std::memcpy(reinterpret_cast<char**>(storage_) + size_of_positions, reinterpret_cast<char**>(other.storage_) + size_of_positions, size_of_chars);
+    }
+
     multi_string(multi_string&& other) noexcept
         : storage_(std::exchange(other.storage_, nullptr))
         , size_(other.size_)
@@ -40,6 +68,7 @@ public:
         delete[] storage_;
         storage_ = std::exchange(other.storage_, nullptr);
         size_ = other.size_;
+        return *this;
     }
 
     ~multi_string() { delete[] storage_; }
@@ -72,14 +101,13 @@ public:
     constexpr auto end() const noexcept { return sentinel{}; }
 
     bool operator==(multi_string const& other) const noexcept {
-        if (size() != other.size()) 
-            return false;
-        for (std::size_t i = 0; i < size_; ++i) {
-            if ((*this)[i] != other[i])
-                return false;
-        }
-        return true;
+        return size() != other.size() ? false : detail::equal(begin(), end(), other.begin());
+    }
+    bool operator!=(multi_string const& other) const noexcept {
+        return !(*this == other);
     }
 };
+
+} // namespace nova
 
 #endif // NOVA_MULTI_STRING_HPP
