@@ -119,7 +119,7 @@ public:
             }
         } 
         else { // compound index
-            multi_string fields_string(string_args, std::forward<Fields>(fields)...);
+            multi_string fields_string(std::forward<Fields>(fields)...);
             if constexpr (Unique) {
                 using base_t = compound_unique_index_interface;
                 using derived_t = ordered_compound_unique_index<sizeof...(Fields), Filter>;
