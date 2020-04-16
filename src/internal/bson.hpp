@@ -97,7 +97,7 @@ public:
 
     template<class T>
     [[nodiscard]] constexpr bool equals_weak(T const& t) const noexcept {
-        if constexpr (std::is_integral_v<T>) {
+        if constexpr (std::is_arithmetic_v<T>) {
             switch (type()) {
                 case types::Bool: return std::get<bool>(storage_) == t;
                 case types::Int32: return std::get<std::int32_t>(storage_) == t;
