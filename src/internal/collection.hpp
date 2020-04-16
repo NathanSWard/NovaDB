@@ -102,11 +102,10 @@ public:
     template<class ID>
     optional<document&> insert(ID&& id) {
         static constexpr document* _fake_document_pointer = nullptr; 
-        auto const [it, inserted] = id_index_.try_emplace(id, _fake_document_pointer);
-        if (inserted) {
-            // TODO INSERT INTO APPROPRIATE INDICES
+        if (auto const [it, inserted] = id_index_.try_emplace(id, _fake_document_pointer); inserted) {
             auto const& doc = docs_.emplace_back(new document(std::forward<ID>(id)));
             it->second = doc;
+            index_manager_.register_document(doc);
             return {*doc};
         }
         return {};
@@ -115,7 +114,7 @@ public:
     [[nodiscard]] std::unique_ptr<document> remove(doc_id const& id) {
         if (auto const it = id_index_.extract(id); it) {
             docs_.erase(std::find(docs_.begin(), docs_.end(), it.mapped()));
-            // TODO ERASE ALL OCCURANCES FROM INDICES
+            index_manager_.remove_document(it.mapped());
             return std::unique_ptr<document>{it.mapped()};
         }
         return nullptr;
@@ -125,9 +124,9 @@ public:
         if (auto const it = id_index_.find(id); it != id_index_.end()) {
             DEBUG_ASSERT(it->second);
             docs_.erase(std::find(docs_.begin(), docs_.end(), it->second));
-            delete it->second;
             id_index_.erase(id);
-            // TODO ERASE ALL OCCURANCES FROM INDICES
+            index_manager_.remove_document(it->second);
+            delete it->second;
             return true;
         }
         return false;
@@ -135,13 +134,13 @@ public:
 
     [[nodiscard]] optional<document&> lookup(doc_id const& id) {
         if (auto const it = id_index_.find(id); it != id_index_.end())
-            return optional<document&>{*(it->second)};
+            return {*(it->second)};
         return {};
     }
 
     [[nodiscard]] optional<document const&> lookup(doc_id const& id) const {
         if (auto const it = id_index_.find(id); it != id_index_.end())
-            return optional<document const&>{*(it->second)};
+            return {*(it->second)};
         return {};
     }
 

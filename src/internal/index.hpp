@@ -203,12 +203,14 @@ struct _base_index_interface {
     [[nodiscard]] virtual bool empty() const noexcept = 0;
     [[nodiscard]] virtual std::size_t size() const noexcept = 0;
     [[nodiscard]] virtual std::size_t field_count() const noexcept = 0;
+    [[nodiscard]] virtual bool contains_doc(non_null_ptr<document const> const doc) const = 0;
     virtual void clear() = 0;
     virtual ~_base_index_interface() = default;
 };
 
 struct _single_field_index_interface : public _base_index_interface {
     virtual index_insert_result insert(bson const&, non_null_ptr<document> const) = 0;
+    [[nodiscard]] virtual bool contains(bson const&) const = 0;
     [[nodiscard]] virtual lookup_result<bson, document> lookup_one(bson const&) = 0;
     [[nodiscard]] virtual lookup_result<bson, document const> lookup_one(bson const&) const = 0;
     [[nodiscard]] virtual cursor lookup_if(function_ref<bool(bson const&)>) = 0;
@@ -228,13 +230,16 @@ struct single_field_unique_index_interface : public _single_field_index_interfac
 struct single_field_multi_index_interface : public _single_field_index_interface {
     [[nodiscard]] virtual cursor lookup_many(bson const&) = 0;
     [[nodiscard]] virtual const_cursor lookup_many(bson const&) const = 0;
-    virtual bool erase(bson const&, non_null_ptr<document> const) = 0;
+    virtual bool erase(bson const&, non_null_ptr<document const> const) = 0;
     virtual ~single_field_multi_index_interface() = default;
 };
 
 struct _compound_index_interface : public _base_index_interface {
     virtual index_insert_result insert(span<bson const>, non_null_ptr<document> const) = 0;
     virtual index_insert_result insert(span<non_null_ptr<bson const>>, non_null_ptr<document> const) = 0;
+    // [[nodiscard]] virtual bool contains(span<bson const> const) const = 0;
+    // [[nodiscard]] virtual bool conatins(span<non_null_ptr<bson const>> const) const = 0;
+    [[nodiscard]] virtual bool contains(document const&) const = 0;
     [[nodiscard]] virtual lookup_result<span<bson const>, document> lookup_one(span<bson const>) = 0;
     [[nodiscard]] virtual lookup_result<span<bson const>, document const> lookup_one(span<bson const>) const = 0;
     [[nodiscard]] virtual cursor lookup_if(function_ref<bool(span<bson const>)>) = 0;
@@ -277,6 +282,18 @@ public:
     {}
 
     ~basic_single_field_unique_index() = default;
+
+    [[nodiscard]] bool contains(bson const& val) const final {
+        return map_.contains(val);
+    }
+
+    [[nodiscard]] bool contains_doc(non_null_ptr<document const> const doc) const final {
+        for (auto&& [val, doc_ptr] : map_) {
+            if (doc == doc_ptr)
+                return true;
+        }
+        return false;
+    }
 
     index_insert_result insert(bson const& val, non_null_ptr<document> const doc) final {
         if (this->filter(val)) {
@@ -378,6 +395,18 @@ public:
         : detail::filter_wrapper<Filter>(std::forward<Fn>(fn))
     {}
 
+    [[nodiscard]] bool contains(bson const& val) const final {
+        return map_.contains(val);
+    }
+
+    [[nodiscard]] bool contains_doc(non_null_ptr<document const> const doc) const final {
+        for (auto&& [val, doc_ptr] : map_) {
+            if (doc == doc_ptr)
+                return true;
+        }
+        return false;
+    }
+
     index_insert_result insert(bson const& val, non_null_ptr<document> const doc) final {
         if (this->filter(val)) {
             map_.emplace(std::make_pair(val, doc));
@@ -444,7 +473,7 @@ public:
         return map_.erase(val);
     }
 
-    bool erase(bson const& val, non_null_ptr<document> const doc) final {
+    bool erase(bson const& val, non_null_ptr<document const> const doc) final {
         if (auto [first, last] = map_.equal_range(val); first != map_.end()) {
             while (first != last) {
                 if (first->second == doc) {
@@ -504,6 +533,14 @@ public:
     basic_compound_unique_index(Fn&& fn)
         : detail::filter_wrapper<Filter>(std::forward<Fn>(fn))
     {}
+
+    [[nodiscard]] bool contains_doc(non_null_ptr<document const> const doc) const final {
+        for (auto&& [fields, doc_ptr] : map_) {
+            if (doc == doc_ptr)
+                return true;
+        }
+        return false;
+    }
 
     index_insert_result insert(span<bson const> vals, non_null_ptr<document> const doc) final {
         DEBUG_ASSERT(vals.size() == N);
@@ -618,6 +655,14 @@ public:
     basic_compound_multi_index(Fn&& fn)
         : detail::filter_wrapper<Filter>(std::forward<Fn>(fn))
     {}
+
+    [[nodiscard]] bool contains_doc(non_null_ptr<document const> const doc) const final {
+        for (auto&& [fields, doc_ptr] : map_) {
+            if (doc == doc_ptr)
+                return true;
+        }
+        return false;
+    }
 
     index_insert_result insert(span<bson const> vals, non_null_ptr<document> const doc) final {
         DEBUG_ASSERT(vals.size() == N);

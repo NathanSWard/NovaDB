@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 
 #include "bson.hpp"
+#include "detail.hpp"
 #include "util/err_result.hpp"
 #include "util/map_results.hpp"
 
@@ -31,6 +32,11 @@ public:
     template<class Key>
     [[nodiscard]] bool contains(Key const& key) const {
         return values_.contains(key);
+    }
+
+    template<class It, class Sent>
+    [[nodiscard]] bool contains(It const it, Sent const sent) const {
+        detail::all_of(it, sent, [this](auto&& field){ return contains(field); });
     }
 
     template<class Key, class... Args>
