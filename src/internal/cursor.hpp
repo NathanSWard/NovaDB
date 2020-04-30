@@ -16,12 +16,13 @@ namespace {
 template<class T>
 class basic_cursor {
     using gen_t = inplace_function<optional<T>(), largest_gen_size>;
+    std::size_t size_;
     gen_t gen_;
 public:
     using value_type = T;
 
     template<class Fn, std::enable_if_t<!std::is_same_v<std::decay_t<Fn>, basic_cursor>, int> = 0>
-    constexpr basic_cursor(Fn&& fn) : gen_(std::forward<Fn>(fn)) {}
+    constexpr basic_cursor(Fn&& fn) : size_(fn.size()), gen_(std::forward<Fn>(fn)) {}
 
     struct sentinel {};
     class iterator {
@@ -50,6 +51,7 @@ public:
         }
     };
 
+    [[nodiscard]] std::size_t size() const noexcept { return size_; }
     [[nodiscard]] auto begin() const& { return iterator{gen_}; }
     [[nodiscard]] auto begin() && { return iterator{std::move(gen_)}; }
     [[nodiscard]] constexpr auto end() const noexcept { return sentinel{}; }
@@ -59,7 +61,18 @@ using cursor = basic_cursor<document&>;
 using const_cursor = basic_cursor<document const&>;
 
 template<class T>
-inline static constexpr auto zero_index_lookup = []() -> optional<T&> { return {}; };
+struct zero_index_lookup_t {
+    constexpr optional<T&> operator()() const noexcept {
+        return {};
+    }
+
+    constexpr std::size_t size() const noexcept {
+        return 0;
+    }
+};
+
+template<class T>
+inline static constexpr zero_index_lookup_t<T> zero_index_lookup{};
 
 template<class T>
 class single_index_lookup {
@@ -73,6 +86,10 @@ public:
             return {*tmp};
         }
         return {};
+    }
+
+    constexpr std::size_t size() const noexcept {
+        return 1;
     }
 };
 
@@ -98,6 +115,10 @@ public:
         }
         return {};
     }
+
+    std::size_t size() const noexcept {
+        return std::distance(first_, last_);
+    }
 };
 
 template<class T, class Deref, class First, class Last>
@@ -121,6 +142,10 @@ public:
             return {*doc};
         }
         return {};
+    }
+
+    std::size_t size() const noexcept {
+        return vec_.size();
     }
 };
 

@@ -152,29 +152,29 @@ struct deref_map_iter_second {
 
 struct sf_cursor_deref {
     template<class It>
-    constexpr auto operator()(It&& it) const noexcept {
-        return std::pair<bson const&, document&>(it->first, *(it->second));
+    constexpr decltype(auto) operator()(It&& it) const noexcept {
+        return *std::forward<It>(it);
     }
 };
 
 struct cmp_cursor_deref {
     template<class It>
     constexpr auto operator()(It&& it) const noexcept {
-        return std::pair<span<bson const> const, document&>(it->first, *(it->second));
+        return std::pair<span<bson const>, non_null_ptr<document>>(it->first, it->second);
     }
 };
 
 struct sf_const_cursor_deref {
     template<class It>
-    constexpr auto operator()(It&& it) const noexcept {
-        return std::pair<bson const&, document const&>(it->first, *(it->second));
+    constexpr decltype(auto) operator()(It&& it) const noexcept {
+        return *reinterpret_cast<std::pair<bson const, non_null_ptr<const document>> const*>(std::addressof(*it));
     }
 };
 
 struct cmp_const_cursor_deref {
     template<class It>
     constexpr auto operator()(It&& it) const noexcept {
-        return std::pair<span<bson const> const, document const&>(it->first, *(it->second));
+        return std::pair<span<bson const>, non_null_ptr<document const>>(it->first, it->second);
     }
 };
 
@@ -185,10 +185,10 @@ namespace {
                                                           , sizeof(typename absl::btree_multimap<int, int>::iterator));
 }
 
-using sf_index_cursor = basic_cursor<std::pair<bson const&, document&>>;
-using cmp_index_cursor = basic_cursor<std::pair<span<bson const> const, document&>>;
-using sf_index_const_cursor = basic_cursor<std::pair<bson const&, document const&>>;
-using cmp_index_const_cursor = basic_cursor<std::pair<span<bson const> const, document const&>>;
+using sf_index_cursor = basic_cursor<std::pair<bson const, non_null_ptr<document>>&>;
+using cmp_index_cursor = basic_cursor<std::pair<span<bson const>, non_null_ptr<document>>>;
+using sf_index_const_cursor = basic_cursor<std::pair<bson const, non_null_ptr<document const>> const&>;
+using cmp_index_const_cursor = basic_cursor<std::pair<span<bson const>, non_null_ptr<document const>>>;
 
 enum class index_insert_result : std::uint8_t {
     success,
@@ -239,7 +239,6 @@ struct _compound_index_interface : public _base_index_interface {
     virtual index_insert_result insert(span<non_null_ptr<bson const>>, non_null_ptr<document> const) = 0;
     // [[nodiscard]] virtual bool contains(span<bson const> const) const = 0;
     // [[nodiscard]] virtual bool conatins(span<non_null_ptr<bson const>> const) const = 0;
-    [[nodiscard]] virtual bool contains(document const&) const = 0;
     [[nodiscard]] virtual lookup_result<span<bson const>, document> lookup_one(span<bson const>) = 0;
     [[nodiscard]] virtual lookup_result<span<bson const>, document const> lookup_one(span<bson const>) const = 0;
     [[nodiscard]] virtual cursor lookup_if(function_ref<bool(span<bson const>)>) = 0;

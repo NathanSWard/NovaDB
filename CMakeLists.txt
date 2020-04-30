@@ -14,6 +14,6 @@ include_directories(${DEPS_DIR}/fmt/include ${DEPS_DIR}/abseil-cpp/absl)
 
 add_subdirectory(${DEPS_DIR}/abseil-cpp)
 
-add_executable(nova tests/main.cpp)
+add_executable(nova example/main.cpp)
 
 target_link_libraries(nova absl::flat_hash_map absl::node_hash_map absl::btree)

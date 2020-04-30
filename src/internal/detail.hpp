@@ -88,6 +88,20 @@ struct is_string_comparable {
 template<class T>
 static constexpr bool is_string_comparable_v = is_string_comparable<T>::value;
 
+struct string_like_hash {
+    using is_transparent = void;
+    std::size_t operator()(std::string_view const sv) const noexcept {
+        return std::hash<std::string_view>{}(sv);
+    }
+};
+
+struct string_like_key_eq {
+    using is_transparent = void;
+    constexpr bool operator()(std::string_view const a, std::string_view const b) const noexcept {
+        return a == b;
+    }
+};
+
 template<class...>
 struct always_false : std::false_type {};
 

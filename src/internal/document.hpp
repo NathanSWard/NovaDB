@@ -125,7 +125,7 @@ class document {
 public:
 
     template<class T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, document>, int> = 0>
-    document(T&& t) : id_(std::forward<T>(t)) {}
+    explicit document(T&& t) : id_(std::forward<T>(t)) {}
 
     document(document const&) = default;
     document(document&&) = default;

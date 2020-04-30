@@ -22,7 +22,7 @@ struct span_size_storage {
 template<>
 struct span_size_storage<dynamic_extent> {
     constexpr span_size_storage(std::size_t const size) noexcept : size_(size) {}
-    std::size_t const size_;
+    std::size_t size_;
 };
 
 template <class R, class T>
@@ -50,9 +50,14 @@ inline static constexpr bool is_container_like_v = is_container_like<T>::value;
 template<class T, size_t N = dynamic_extent>
 class span : private detail::span_size_storage<N> {
     using storage = detail::span_size_storage<N>;
-    T* const ptr_ = nullptr;
+    T* ptr_ = nullptr;
 public:
     constexpr span() noexcept = default;
+
+    constexpr span(span const&) = default;
+    constexpr span& operator=(span const&) = default; 
+    constexpr span(span&&) = default;
+    constexpr span& operator=(span&&) = default; 
 
     template<class First, class Last>
     constexpr span(First const first, Last const last) noexcept
@@ -81,12 +86,12 @@ public:
     constexpr span(std::array<U, N> const& arr) noexcept
         : ptr_(arr.data()) {}
 
-    template<class U, std::enable_if_t<std::is_lvalue_reference_v<U> && std::is_same_v<T, std::decay_t<U>>
-                                       && !std::is_same_v<std::decay_t<U>, span>, int> = 0>
-    constexpr span(U&& u) noexcept 
-        : storage(1)
-        , ptr_(std::addressof(u)) 
-    {}
+    //template<class U, std::enable_if_t<std::is_lvalue_reference_v<U> && std::is_same_v<T, std::decay_t<U>>
+    //                                   && !std::is_same_v<std::decay_t<U>, span>, int> = 0>
+    //constexpr span(U&& u) noexcept 
+    //    : storage(1)
+    //    , ptr_(std::addressof(u)) 
+    //{}
 
     constexpr T& operator[](std::size_t const pos) const noexcept {
         DEBUG_ASSERT(pos < size());

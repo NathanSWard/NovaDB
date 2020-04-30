@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <iostream>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -115,8 +116,8 @@ enum class index_type : std::uint8_t {
 };
 
 class index_manager {
-    single_field_index_map<single_field_unique_index_interface> single_field_unique_indices{};
-    single_field_index_map<single_field_multi_index_interface> single_field_multi_indices{};
+    single_field_index_map<single_field_unique_index_interface> single_field_unique_indices_{};
+    single_field_index_map<single_field_multi_index_interface> single_field_multi_indices_{};
     compound_index_map<compound_unique_index_interface> compound_unique_indices_{};
     compound_index_map<compound_multi_index_interface> compound_multi_indices_{};
 public:
@@ -135,24 +136,22 @@ public:
             if constexpr (Unique) {
                 using base_t = single_field_unique_index_interface;
                 using derived_t = ordered_single_field_unique_index<Filter>;
-                using opt_t = optional<derived_t&>;
+                using result_t = lookup_result<std::string, derived_t>;
 
-                if (!single_field_multi_indices.contains(fields...)) {
-                    if (auto const [it, b] = single_field_unique_indices.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
-                        return opt_t{*static_cast<derived_t*>(it->second.get())};
-                }
-                return opt_t{};
+                if (!single_field_multi_indices_.contains(fields...))
+                    if (auto const [it, b] = single_field_unique_indices_.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
+                        return result_t{it->first, *static_cast<derived_t*>(it->second.get())}; 
+                return result_t{};
             }
             else { // multi
                 using base_t = single_field_multi_index_interface;
                 using derived_t = ordered_single_field_multi_index<Filter>;
-                using opt_t = optional<derived_t&>;
+                using result_t = lookup_result<std::string, derived_t>;
 
-                if (!single_field_unique_indices.contains(fields...)) {
-                    if (auto const [it, b] = single_field_multi_indices.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
-                        return opt_t{*static_cast<derived_t*>(it->second.get())};
-                }
-                return opt_t{};
+                if (!single_field_unique_indices_.contains(fields...))
+                    if (auto const [it, b] = single_field_multi_indices_.try_emplace(std::forward<Fields>(fields)..., detail::lazy_allocation<base_t, derived_t>{}); b)
+                        return result_t{it->first, *static_cast<derived_t*>(it->second.get())}; 
+                return result_t{};
             }
         } 
         else { // compound index
@@ -160,32 +159,36 @@ public:
             if constexpr (Unique) {
                 using base_t = compound_unique_index_interface;
                 using derived_t = ordered_compound_unique_index<sizeof...(Fields), Filter>;
-                using opt_t = optional<derived_t&>;
+                using result_t = lookup_result<multi_string, derived_t>;
 
                 if (auto const [first, last] = compound_multi_indices_.equal_range(fields_string)
                     ; first == compound_multi_indices_.end() || std::none_of(first, last, [&fields_string](auto&& p){ return p.first == fields_string; })) {
+
                     auto const it = compound_unique_indices_.emplace(
                         std::piecewise_construct,
                         std::forward_as_tuple(std::move(fields_string)),
                         std::forward_as_tuple(std::unique_ptr<base_t>((base_t*) new derived_t())));
-                    return opt_t{*reinterpret_cast<derived_t*>(it->second.get())};
+
+                    return result_t{it->first, *reinterpret_cast<derived_t*>(it->second.get())};
                 }
-                return opt_t{};
+                return result_t{};
             }
             else { // multi
                 using base_t = compound_multi_index_interface;
                 using derived_t = ordered_compound_multi_index<sizeof...(Fields), Filter>;
-                using opt_t = optional<derived_t&>;
+                using result_t = lookup_result<multi_string, derived_t>;
 
                 if (auto const [first, last] = compound_unique_indices_.equal_range(fields_string)
                     ; first == compound_unique_indices_.end() || std::none_of(first, last, [&fields_string](auto&& p){ return p.first == fields_string; })) {
+
                     auto const it = compound_multi_indices_.emplace(
                         std::piecewise_construct,
                         std::forward_as_tuple(std::move(fields_string)),
                         std::forward_as_tuple(std::unique_ptr<base_t>((base_t*) new derived_t())));
-                    return opt_t{*reinterpret_cast<derived_t*>(it->second.get())};
+
+                    return result_t{it->first, *reinterpret_cast<derived_t*>(it->second.get())};
                 }
-                return opt_t{};
+                return result_t{};
             }
         }
     }
@@ -193,14 +196,14 @@ public:
     // remove a document from all indices held.
     // precondition: the document *must* have been previously inserted
     void remove_document(document const& doc) {
-        for (auto&& [field, index] : single_field_unique_indices) {
+        for (auto&& [field, index] : single_field_unique_indices_) {
             if (auto const value = doc.values().lookup(field); value) {
                 DEBUG_ASSERT(index->contains_doc(std::addressof(doc)));
                 index->erase(value.value());
             }
         }
 
-        for (auto&& [field, index] : single_field_multi_indices) {
+        for (auto&& [field, index] : single_field_multi_indices_) {
             if (auto const value = doc.values().lookup(field); value) {
                 DEBUG_ASSERT(index->contains_doc(std::addressof(doc)));
                 index->erase(value.value(), std::addressof(doc));
@@ -253,8 +256,8 @@ public:
             }
         };
 
-        register_single_field(single_field_unique_indices);
-        register_single_field(single_field_multi_indices);
+        register_single_field(single_field_unique_indices_);
+        register_single_field(single_field_multi_indices_);
         register_compound(compound_unique_indices_);
         register_compound(compound_multi_indices_);
     }
@@ -266,6 +269,99 @@ public:
     template<class It>
     void register_documents(It first, It const last) {
         std::for_each(first, last, [this](auto&& doc){ register_document(doc); });
+    }
+
+    template<class... Fields>
+    auto lookup(Fields const&... fields) {
+        if constexpr(sizeof...(Fields) == 0) {
+            static_assert(detail::always_false<Fields...>::value);
+        }
+        else if constexpr (sizeof...(Fields) == 1) {
+            using result_t = optional<sf_index_cursor>;
+            std::string_view const field{fields...};
+
+            if (auto const found = single_field_unique_indices_.find(field); found != single_field_unique_indices_.end())
+                return result_t{found->second->iterate()};
+            if (auto const found = single_field_multi_indices_.find(field); found != single_field_multi_indices_.end())
+                return result_t{found->second->iterate()};
+            return result_t{};
+        }
+        else { // sizeof...(Fields) > 1
+            using variant_t = std::variant<sf_index_cursor, cmp_index_cursor>;
+            using result_t = optional<variant_t>;
+            auto const sv_tpl = std::make_tuple(std::string_view{fields}...);
+            
+            // check compound indices first
+            if (auto const found = compound_unique_indices_.find(sv_tpl); found != compound_unique_indices_.end())
+                return result_t{variant_t{found->second->iterate()}};
+            if (auto const found = compound_multi_indices_.find(sv_tpl); found != compound_multi_indices_.end())
+                return result_t{variant_t{found->second->iterate()}};
+
+            // check single field indices
+            if (auto const found = lookup_fields_in_single_filed_indices(sv_tpl); found)
+                return result_t{variant_t{std::move(found.value())}};
+
+            return result_t{}; 
+        }
+    }
+
+    void print_indices() const {
+        auto print_single_field = [](auto&& index_map) {
+            for (auto&& [field, map] : index_map) {
+                std::cout << "    indexed field: \"" << field << "\"\n";
+                std::cout << "{\n";
+                for (auto&& [val, doc_ptr] : map->iterate()) 
+                    std::cout << fmt::format("    {}, {},\n", val, doc_ptr->id());
+                std::cout << "}\n";
+            }
+        };
+
+        auto print_compound = [](auto&& index_map) {
+            for (auto&& [fields, map] : index_map) {
+                std::cout << "    indexed fields: ";
+                std::cout << "[";
+                auto first = true;
+                for (auto&& f : fields) {
+                    if (!first)
+                        std::cout << ", ";
+                    std::cout << fmt::format("\"{}\"", f);
+                    first = false;
+                }
+                std::cout << "]\n";
+                std::cout << "{\n";
+                for (auto&& [vals, doc_ptr] : map->iterate())  {
+                    std::cout << "    [";
+                    first = true;
+                    for (auto&& val : vals) {
+                        if (!first)
+                            std::cout << ", ";
+                        std::cout << fmt::format("{}", val);
+                        first = false;
+                    }
+                    std::cout << "], ";
+                    std::cout << fmt::format("{},\n", doc_ptr->id());
+                }
+                std::cout << "}\n";
+            }
+        };
+
+        print_single_field(single_field_unique_indices_);
+        print_single_field(single_field_multi_indices_);
+        print_compound(compound_unique_indices_);
+        print_compound(compound_multi_indices_);
+    }
+
+private:
+    template<std::size_t I, class... Fields>
+    optional<sf_index_cursor> lookup_fields_in_single_filed_indices(std::tuple<Fields...> const& fields) {
+        if constexpr (I == sizeof...(Fields))
+            return {};
+        else {
+            if (auto const found = this->lookup(std::get<I>(fields)); found)
+                return found;
+            else
+                return lookup_fields_in_single_filed_indices<I + 1>(fields);
+        }
     }
 };
 

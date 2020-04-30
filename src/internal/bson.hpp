@@ -88,7 +88,7 @@ public:
     }
 
     template<class T>
-    [[nodiscard]] bool equals_strong(T const& t) const noexcept {
+    [[nodiscard]] constexpr bool equals_strong(T const& t) const noexcept {
         static_assert(is_valid_type<T>);
         if (auto const val = as<T>(); val)
             return *val == t;
